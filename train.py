@@ -17,15 +17,15 @@ parser.add_argument('--aptonly', action='store_true', help='whether only adaptiv
 parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
-parser.add_argument('--num-rank', type=int, default=3, help='')
-parser.add_argument('--nhid', type=int, default=32, help='')
+parser.add_argument('--num-rank', type=int, default=5, help='')
+parser.add_argument('--nhid', type=int, default=128, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
-parser.add_argument('--num_nodes', type=int, default=325, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
+parser.add_argument('--batch_size', type=int, default=256, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
-parser.add_argument('--epochs', type=int, default=100, help='')
+parser.add_argument('--epochs', type=int, default=100000, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
 #parser.add_argument('--seed',type=int,default=99,help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
@@ -41,7 +41,22 @@ def main():
     # load data
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
-    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size)
+
+    target_sensors = ['404444',
+                      '404434',
+                      '400582',
+                      '400222',
+                      '400952',
+                      '400097',
+                      '401224',
+                      '401210',
+                      '400828',
+                      '400507',
+                      '400648',
+                      '400185']
+    target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
+
+    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
     scaler = dataloader['scaler']
     supports = [torch.tensor(i).to(device) for i in adj_mx]
 
@@ -54,6 +69,8 @@ def main():
 
     if args.aptonly:
         supports = None
+
+    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -118,6 +135,13 @@ def main():
         mvalid_mape = np.mean(valid_mape)
         mvalid_rmse = np.mean(valid_rmse)
         his_loss.append(mvalid_loss)
+
+        engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
+        engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
+        engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
+        engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
+        engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
+        engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)

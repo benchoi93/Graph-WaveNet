@@ -146,12 +146,17 @@ def load_adj(pkl_filename, adjtype):
     return sensor_ids, sensor_id_to_ind, adj
 
 
-def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None):
+def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None, target_sensor_inds=None):
     data = {}
     for category in ['train', 'val', 'test']:
         cat_data = np.load(os.path.join(dataset_dir, category + '.npz'))
-        data['x_' + category] = cat_data['x']
-        data['y_' + category] = cat_data['y']
+        if target_sensor_inds is not None:
+            data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :]
+            data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :]
+        else:
+            data['x_' + category] = cat_data['x']
+            data['y_' + category] = cat_data['y']
+
     scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
     # Data format
     for category in ['train', 'val', 'test']:
