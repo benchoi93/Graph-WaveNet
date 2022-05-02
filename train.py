@@ -18,10 +18,11 @@ parser.add_argument('--addaptadj', action='store_true', help='whether add adapti
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
-parser.add_argument('--nhid', type=int, default=128, help='')
+parser.add_argument('--nhid', type=int, default=64, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=256, help='batch size')
+parser.add_argument('--n-components', type=int, default=5, help='number of mixture components')
+parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
@@ -54,6 +55,10 @@ def main():
                       '400507',
                       '400648',
                       '400185']
+
+    # target_sensors = sensor_ids
+    args.num_nodes = len(target_sensors)
+
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
@@ -78,7 +83,7 @@ def main():
 
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit, n_components=5)
+                         adjinit, n_components=args.n_components)
 
     print("start training...", flush=True)
     his_loss = []
