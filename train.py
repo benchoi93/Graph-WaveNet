@@ -6,6 +6,7 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 from mdn_engine import MDN_trainer
+from sparse_mdn_engine import SparseMDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
@@ -21,7 +22,7 @@ parser.add_argument('--num-rank', type=int, default=5, help='')
 parser.add_argument('--nhid', type=int, default=128, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=256, help='batch size')
+parser.add_argument('--batch_size', type=int, default=32, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
@@ -55,6 +56,13 @@ def main():
                       '400648',
                       '400185']
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
+    target_sensor_inds = [sensor_id_to_ind[i] for i in sensor_ids]
+
+    args.num_nodes = len(target_sensor_inds)
+
+    import pandas as pd
+    adj_1hop = pd.read_csv("data/pems-bay-filtered-1hop_onepart.CSV")
+    adj_1hop = adj_1hop.iloc[:, 1:].to_numpy()
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
     scaler = dataloader['scaler']
@@ -71,6 +79,7 @@ def main():
         supports = None
 
     adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
+    # adj_1hop = (adjinit != 0).cpu().numpy()
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -79,6 +88,10 @@ def main():
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=5)
+
+    # engine = SparseMDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
+    #                            args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
+    #                            adjinit, n_components=5, adj_1hop=adj_1hop)
 
     print("start training...", flush=True)
     his_loss = []

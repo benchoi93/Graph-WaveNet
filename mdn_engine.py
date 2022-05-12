@@ -60,7 +60,7 @@ class LowRankMDNhead(nn.Module):
         com_dist = Dist.LowRankMultivariateNormal(
             loc=mu,
             cov_factor=V,
-            cov_diag=torch.ones_like(D) * 0.1
+            cov_diag=torch.ones_like(D) * 0.01
         )
 
         dist = Dist.MixtureSameFamily(mix_dist, com_dist)
@@ -160,7 +160,6 @@ class MDN_trainer():
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
-        
 
         return loss.item(), mape, rmse
 
