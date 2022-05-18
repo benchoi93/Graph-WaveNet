@@ -122,8 +122,8 @@ class MDN_trainer():
         # self.mdn_head.to(device)
         self.fc_w.to(device)
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lrate, weight_decay=wdecay)
-        self.loss = util.masked_mae
+        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_w.parameters()), lr=lrate, weight_decay=wdecay)
+        # self.loss = util.masked_mae
         self.scaler = scaler
         self.clip = 5
 
