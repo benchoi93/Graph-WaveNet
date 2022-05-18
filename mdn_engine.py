@@ -50,7 +50,10 @@ class LowRankMDNhead(nn.Module):
 
     def get_sparsity_regularization_loss(self, dist):
         # reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
-        reg_loss = (dist.component_distribution.precision_matrix).abs().mean()
+        precision = dist.component_distribution.precision_matrix
+        b, n, d, _ = precision.size()
+        # get LASSO for non-diagonal elements of precision matrices
+        reg_loss = precision.flatten(2)[:, :, 1:].view(b, n, d-1, d+1)[:, :, :, :-1].abs().mean()
         return reg_loss
 
     def sample(self, features, n=None):
