@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 
 class LowRankMDNhead(nn.Module):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12):
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1):
 
         self.n_components = n_components
         self.n_vars = n_vars
@@ -23,6 +23,8 @@ class LowRankMDNhead(nn.Module):
         self.dim_mu = n_components * n_vars
         self.dim_D = n_components * n_vars
         self.dim_V = n_components * n_vars * n_rank
+
+        self.reg_coef = reg_coef
 
         self.output_dim = self.dim_w + self.dim_mu + self.dim_D + self.dim_V
 
@@ -41,8 +43,14 @@ class LowRankMDNhead(nn.Module):
         assert('V' in features.keys())
 
         dist = self.get_output_distribution(features)
-        loss = - dist.log_prob(y[:, :, self.pred_len - 1]).mean()
-        return loss
+        nll_loss = - dist.log_prob(y[:, :, self.pred_len - 1]).mean()
+        reg_loss = self.get_sparsity_regularization_loss(dist)
+        loss = nll_loss + reg_loss * self.reg_coef
+        return loss, nll_loss.item(), reg_loss.item()
+
+    def get_sparsity_regularization_loss(self, dist):
+        reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
+        return reg_loss
 
     def sample(self, features, n=None):
         dist = self.get_output_distribution(features)
@@ -148,7 +156,7 @@ class MDN_trainer():
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
+        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
         loss.backward()
         if self.clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
@@ -160,9 +168,8 @@ class MDN_trainer():
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
-        
 
-        return loss.item(), mape, rmse
+        return loss.item(), mape, rmse, nll_loss, reg_loss
 
     def eval(self, input, real_val):
         if self.model.training:
@@ -191,7 +198,7 @@ class MDN_trainer():
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
+        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
 
         # output = self.model(input)
         # output = output.transpose(1, 3)
@@ -208,7 +215,7 @@ class MDN_trainer():
         if self.specific:
             self.specific_eval(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=real_val)
 
-        return loss.item(), mape, rmse
+        return loss.item(), mape, rmse, nll_loss, reg_loss
 
     def specific_eval(self, features, y):
         self.specific = False

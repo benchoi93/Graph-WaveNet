@@ -92,6 +92,8 @@ def main():
         train_loss = []
         train_mape = []
         train_rmse = []
+        train_nll_loss = []
+        train_reg_loss = []
         t1 = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
@@ -103,6 +105,9 @@ def main():
             train_loss.append(metrics[0])
             train_mape.append(metrics[1])
             train_rmse.append(metrics[2])
+            train_nll_loss.append(metrics[3])
+            train_reg_loss.append(metrics[4])
+
             if iter % args.print_every == 0:
                 log = 'Iter: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}'
                 print(log.format(iter, train_loss[-1], train_mape[-1], train_rmse[-1]), flush=True)
@@ -112,6 +117,8 @@ def main():
         valid_loss = []
         valid_mape = []
         valid_rmse = []
+        valid_nll_loss = []
+        valid_reg_loss = []
 
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
@@ -123,6 +130,9 @@ def main():
             valid_loss.append(metrics[0])
             valid_mape.append(metrics[1])
             valid_rmse.append(metrics[2])
+            valid_nll_loss.append(metrics[3])
+            valid_reg_loss.append(metrics[4])
+
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
         print(log.format(i, (s2-s1)))
@@ -130,18 +140,28 @@ def main():
         mtrain_loss = np.mean(train_loss)
         mtrain_mape = np.mean(train_mape)
         mtrain_rmse = np.mean(train_rmse)
+        mtrain_nll_loss = np.mean(train_nll_loss)
+        mtrain_reg_loss = np.mean(train_reg_loss)
 
         mvalid_loss = np.mean(valid_loss)
         mvalid_mape = np.mean(valid_mape)
         mvalid_rmse = np.mean(valid_rmse)
+        mvalid_nll_loss = np.mean(valid_nll_loss)
+        mvalid_reg_loss = np.mean(valid_reg_loss)
         his_loss.append(mvalid_loss)
 
         engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
         engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
+
         engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
         engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
         engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
         engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
+
+        engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
+        engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
+        engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
+        engine.summary.add_scalar('loss/val_reg_loss', mvalid_reg_loss, i)
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)
