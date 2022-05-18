@@ -30,6 +30,8 @@ parser.add_argument('--print_every', type=int, default=50, help='')
 #parser.add_argument('--seed',type=int,default=99,help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
+parser.add_argument('--n_components', type=int, default=5, help='experiment id')
+parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
 
 args = parser.parse_args()
 
@@ -78,7 +80,7 @@ def main():
 
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit, n_components=5)
+                         adjinit, n_components=args.n_components, reg_coef=args.reg_coef)
 
     print("start training...", flush=True)
     his_loss = []

@@ -49,7 +49,8 @@ class LowRankMDNhead(nn.Module):
         return loss, nll_loss.item(), reg_loss.item()
 
     def get_sparsity_regularization_loss(self, dist):
-        reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
+        # reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
+        reg_loss = (dist.component_distribution.precision_matrix).abs().mean()
         return reg_loss
 
     def sample(self, features, n=None):
@@ -80,7 +81,7 @@ class LowRankMDNhead(nn.Module):
 
 
 class MDN_trainer():
-    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components):
+    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -99,7 +100,7 @@ class MDN_trainer():
 
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
-        self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank)
+        self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -124,7 +125,7 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}'
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
 
@@ -252,3 +253,4 @@ class MDN_trainer():
             sns_plot = sns.heatmap(sample_cov[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('cov_matrix/' + str(i), fig,  self.cnt)
+        self.cnt += 1
