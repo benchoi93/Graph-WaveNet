@@ -32,6 +32,7 @@ parser.add_argument('--save', type=str, default='./garage/pems', help='save path
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
 parser.add_argument('--n_components', type=int, default=5, help='experiment id')
 parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
+parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 
 args = parser.parse_args()
 
@@ -167,7 +168,10 @@ def main():
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)
+
+        if i % args.save_every == 0:
         torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
+
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
