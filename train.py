@@ -57,6 +57,21 @@ def main():
                       '400507',
                       '400648',
                       '400185']
+
+    target_sensors = ['404444',
+                      '400582',
+                      '400097',
+                      '401224',
+                      '400828',
+                      '400648',
+                      '404434',
+                      '400222',
+                      '400952',
+                      '401210',
+                      '400507',
+                      '400185'
+                      ]
+
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
