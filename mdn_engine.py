@@ -250,6 +250,8 @@ class MDN_trainer():
         for i in range(sample_cov.size(0)):
             corr[i] = torch.corrcoef(sample_cov[i])
 
+        sparsity = (sample_prec > 0.01).float()
+
         for i in range(sample_cov.shape[0]):
             sns_plot = sns.heatmap(corr[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
             fig = sns_plot.get_figure()
@@ -262,5 +264,9 @@ class MDN_trainer():
             sns_plot = sns.heatmap(sample_prec[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('prec_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(sparsity[i].detach().cpu().numpy(), cmap='coolwarm')
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('sparsity/' + str(i), fig,  self.cnt)
 
         self.cnt += 1
