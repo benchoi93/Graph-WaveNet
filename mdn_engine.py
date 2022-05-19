@@ -72,7 +72,8 @@ class LowRankMDNhead(nn.Module):
         com_dist = Dist.LowRankMultivariateNormal(
             loc=mu,
             cov_factor=V,
-            cov_diag=torch.ones_like(D) * 0.1
+            # cov_diag=torch.ones_like(D) * 0.1
+            cov_diag=D
         )
 
         dist = Dist.MixtureSameFamily(mix_dist, com_dist)
@@ -128,7 +129,7 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}'
+        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}'
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
 
@@ -243,6 +244,7 @@ class MDN_trainer():
 
         dist = self.mdn_head.get_output_distribution(features)
         sample_cov = dist.component_distribution.covariance_matrix[0]
+        sample_prec = dist.component_distribution.precision_matrix[0]
 
         corr = torch.zeros_like(sample_cov)
         for i in range(sample_cov.size(0)):
@@ -256,4 +258,9 @@ class MDN_trainer():
             sns_plot = sns.heatmap(sample_cov[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('cov_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(sample_prec[i].detach().cpu().numpy(), cmap='coolwarm')
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('prec_matrix/' + str(i), fig,  self.cnt)
+
         self.cnt += 1

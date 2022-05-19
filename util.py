@@ -33,7 +33,7 @@ class DataLoader(object):
         self.xs = xs
         self.ys = ys
 
-    def get_iterator(self):
+    def get_iterator(self, force_idx=None):
         self.current_ind = 0
 
         def _wrapper():
@@ -42,6 +42,11 @@ class DataLoader(object):
                 end_ind = min(self.size, self.batch_size * (self.current_ind + 1))
                 x_i = self.xs[start_ind: end_ind, ...]
                 y_i = self.ys[start_ind: end_ind, ...]
+
+                if force_idx is not None:
+                    x_i[0] = self.xs[force_idx, ...]
+                    y_i[0] = self.ys[force_idx, ...]
+
                 yield (x_i, y_i)
                 self.current_ind += 1
 

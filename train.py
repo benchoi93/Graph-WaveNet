@@ -124,7 +124,7 @@ def main():
         valid_reg_loss = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
+        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator(171)):
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)
             testy = torch.Tensor(y).to(device)
