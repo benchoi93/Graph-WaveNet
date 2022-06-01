@@ -11,7 +11,7 @@ import torch.distributions as Dist
 from tensorboardX import SummaryWriter
 
 
-class FixedMDN(nn.Module):
+class FixedLowRankMDN(nn.Module):
     def __init__(self, n_components, n_vars, n_rank):
         super(FixedMDN, self).__init__()
         self.dim_D = (n_vars, n_components)
@@ -19,6 +19,14 @@ class FixedMDN(nn.Module):
 
         self.D = nn.Parameter(torch.randn(self.dim_D))
         self.V = nn.Parameter(torch.randn(self.dim_V))
+
+
+class FixedMDN(nn.Module):
+    def __init__(self, n_components, n_vars):
+        super(FixedMDN, self).__init__()
+        self.dim_L = (n_components, n_vars, n_vars)
+
+        self.L = nn.Parameter(torch.tril(torch.randn(*self.dim_L)))
 
 
 class LowRankMDNhead(nn.Module):
@@ -45,13 +53,6 @@ class LowRankMDNhead(nn.Module):
         #    - features['mu'] : (batch_size, n_components, n_vars)
         #    - features['D'] : (batch_size, n_components, n_vars)
         #    - features['V'] : (batch_size, n_components, n_vars, n_rank)
-
-        # check if 'w' , 'mu' , 'D' and 'V' are in features.keys()
-        # raise error if not
-        assert('w' in features.keys())
-        assert('mu' in features.keys())
-        assert('D' in features.keys())
-        assert('V' in features.keys())
 
         dist = self.get_output_distribution(features)
         nll_loss = - dist.log_prob(y[:, :, self.pred_len - 1]).mean()
@@ -83,7 +84,9 @@ class LowRankMDNhead(nn.Module):
         com_dist = Dist.LowRankMultivariateNormal(
             loc=mu,
             cov_factor=V,
+            # cov_factor=torch.zeros_like(V),
             # cov_diag=torch.ones_like(D) * 0.1
+            # cov_diag=torch.ones_like(D) * 0.01
             cov_diag=D
         )
 
@@ -91,12 +94,56 @@ class LowRankMDNhead(nn.Module):
         return dist
 
     def get_parameters(self, features):
+        # check if 'w' , 'mu' , 'D' and 'V' are in features.keys()
+        # raise error if not
+        assert('w' in features.keys())
+        assert('mu' in features.keys())
+        assert('D' in features.keys())
+        assert('V' in features.keys())
+
         # input : features : dict of tensors, keys: w, mu, D, V
         return features['w'], features['mu'], features['D'], features['V']
 
 
+class WishartMDNhead(LowRankMDNhead):
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1):
+        super(WishartMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef)
+
+        self.n_components = n_components
+        self.n_vars = n_vars
+        self.n_rank = n_rank
+        self.pred_len = pred_len
+
+        self.reg_coef = reg_coef
+
+    def get_output_distribution(self, features):
+        # input : features
+        # shape of input = (batch_size, hidden)
+        # w, mu, cov = self.get_parameters(features)
+        w, mu, scale_tril = self.get_parameters(features)
+        mix_dist = Dist.Categorical(w.squeeze(-1))
+        com_dist = Dist.MultivariateNormal(
+            loc=mu,
+            scale_tril=scale_tril
+        )
+
+        dist = Dist.MixtureSameFamily(mix_dist, com_dist)
+        return dist
+
+    def get_parameters(self, features):
+        # input : features : dict of tensors, keys: w, mu, D, V
+        # check if 'w' , 'mu' , 'L' are in features.keys()
+        # raise error if not
+        assert('w' in features.keys())
+        assert('mu' in features.keys())
+        # assert('cov' in features.keys())
+        # return features['w'], features['mu'], features['cov']
+        return features['w'], features['mu'], features['scale_tril']
+
+
 class MDN_trainer():
-    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef):
+    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
+                 mode="cholesky", time_varying=False):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -111,16 +158,31 @@ class MDN_trainer():
 
         # dim_out = self.dim_w + self.dim_mu + self.dim_V + self.dim_D
         # self.out_per_comp = 2
-        self.out_per_comp = num_rank + 2
-        dim_out = n_components * 1
+        self.mode = mode
+        self.time_varying = time_varying
+
+        if time_varying:
+            if mode == "cholesky":
+                self.out_per_comp = num_rank + 1
+            elif mode == "lowrank":
+                self.out_per_comp = 1
+        else:
+            if mode == "cholesky":
+                self.out_per_comp = num_rank + 1
+            elif mode == "lowrank":
+                raise NotImplementedError
+
+        # self.out_per_comp = num_rank + 1
+        dim_out = n_components * self.out_per_comp
 
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
-        self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
+        # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
+        self.mdn_head = WishartMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
-        self.covariance = FixedMDN(n_components, num_nodes, num_rank)
+        self.covariance = FixedMDN(n_components, num_nodes)
 
         self.fc_w = nn.Sequential(
             nn.Linear(num_nodes*self.out_per_comp, nhid),
@@ -137,7 +199,8 @@ class MDN_trainer():
         # self.mdn_head.to(device)
         self.fc_w.to(device)
 
-        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_w.parameters()) + list(self.covariance.parameters()), lr=lrate, weight_decay=wdecay)
+        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_w.parameters()) +
+                                    list(self.covariance.parameters()), lr=lrate, weight_decay=wdecay)
         # self.loss = util.masked_mae
         self.scaler = scaler
         self.clip = 5
@@ -154,24 +217,40 @@ class MDN_trainer():
         output = self.model(input)
         output = output.transpose(1, 3)
 
-        output = output.view(-1, self.num_nodes, self.n_components, 1)
-        D = self.covariance.D.unsqueeze(0).expand(output.shape[0], -1, -1)
-        V = self.covariance.V.unsqueeze(0).expand(output.shape[0], -1, -1, -1)
-        output = torch.cat([output, D.unsqueeze(-1), V], -1)
+        output = output.view(-1, self.num_nodes, self.n_components, self.out_per_comp)
+        L = torch.tril(self.covariance.L.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
+        L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)] = torch.nn.functional.elu(
+            L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)]) + 1
 
         mus = output[:, :, :, 0]
-        mus = torch.einsum('abc->acb', mus)
-        D = torch.einsum('abc -> acb', D)
+
+        V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
 
-        D = nn.functional.elu(D) + 1
+        # if self.time_varying:
+        #     covariance = torch.zeros((output.shape[0], self.n_components, self.num_nodes, self.num_nodes), device=self.device)
+        #     for i in range(self.num_rank):
+        #         temp = torch.einsum('bcij, bcjk->bcik', L, V[:, :, :, i:(i+1)])
+        #         covariance += torch.einsum('bcij, bcik->bcik', temp, temp.transpose(-1, 2))
+        #     covariance /= self.num_rank
+        # else:
+        #     covariance = torch.einsum("bcij , bcjk -> bcik", L, L.transpose(-1, -2))
+
+        # D = self.covariance.D.unsqueeze(0).expand(output.shape[0], -1, -1)
+        # V = self.covariance.V.unsqueeze(0).expand(output.shape[0], -1, -1, -1)
+        # output = torch.cat([output, D.unsqueeze(-1), V], -1)
+
+        mus = torch.einsum('abc->acb', mus)
+        # D = torch.einsum('abc -> acb', D)
+        # V = torch.einsum('abcd -> acbd', V)
+        # D = nn.functional.elu(D) + 1
         output = output.reshape(-1, self.n_components, self.num_nodes * self.out_per_comp)
         w = self.fc_w(output)
         # w activate softmax0
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
+        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
         loss.backward()
         if self.clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
@@ -179,7 +258,7 @@ class MDN_trainer():
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
         real = real_val[:, :, 11]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'D': D, 'V': V})
+        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
@@ -195,31 +274,47 @@ class MDN_trainer():
         output = self.model(input)
         output = output.transpose(1, 3)
 
-        output = output.view(-1, self.num_nodes, self.n_components, 1)
-        D = self.covariance.D.unsqueeze(0).expand(output.shape[0], -1, -1)
-        V = self.covariance.V.unsqueeze(0).expand(output.shape[0], -1, -1, -1)
-        output = torch.cat([output, D.unsqueeze(-1), V], -1)
+        output = output.view(-1, self.num_nodes, self.n_components, self.out_per_comp)
+        L = torch.tril(self.covariance.L.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
+        L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)] = torch.nn.functional.elu(
+            L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)]) + 1
 
         mus = output[:, :, :, 0]
-        mus = torch.einsum('abc->acb', mus)
-        D = torch.einsum('abc -> acb', D)
+
+        V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
 
-        D = nn.functional.elu(D) + 1
+        # if self.time_varying:
+        #     covariance = torch.zeros((output.shape[0], self.n_components, self.num_nodes, self.num_nodes), device=self.device)
+        #     for i in range(self.num_rank):
+        #         temp = torch.einsum('bcij, bcjk->bcik', L, V[:, :, :, i:(i+1)])
+        #         covariance += torch.einsum('bcij, bcik->bcik', temp, temp.transpose(-1, 2))
+        #     covariance /= self.num_rank
+        # else:
+        #     covariance = torch.einsum("bcij , bcjk -> bcik", L, L.transpose(-1, -2))
+
+        # D = self.covariance.D.unsqueeze(0).expand(output.shape[0], -1, -1)
+        # V = self.covariance.V.unsqueeze(0).expand(output.shape[0], -1, -1, -1)
+        # output = torch.cat([output, D.unsqueeze(-1), V], -1)
+
+        mus = torch.einsum('abc->acb', mus)
+        # D = torch.einsum('abc -> acb', D)
+        # V = torch.einsum('abcd -> acbd', V)
+        # D = nn.functional.elu(D) + 1
         output = output.reshape(-1, self.n_components, self.num_nodes * self.out_per_comp)
         w = self.fc_w(output)
         # w activate softmax0
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
+        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
 
         # output = self.model(input)
         # output = output.transpose(1, 3)
-        #output = [batch_size,12,num_nodes,1]
+        # output = [batch_size,12,num_nodes,1]
         # real = torch.unsqueeze(real_val, dim=1)
         real = real_val[:, :, 11]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'D': D, 'V': V})
+        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
         predict = self.scaler.inverse_transform(output)
         # predict = output
         # loss = self.loss(predict, real, 0.0)
@@ -227,7 +322,7 @@ class MDN_trainer():
         rmse = util.masked_rmse(predict, real, 0.0).item()
 
         if self.specific:
-            self.specific_eval(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=real_val)
+            self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L}, y=real_val)
 
         return loss.item(), mape, rmse, nll_loss, reg_loss
 
@@ -235,10 +330,10 @@ class MDN_trainer():
         self.specific = False
         w = features['w']
         mu = features['mu']
-        D = features['D']
-        V = features['V']
+        L = features['scale_tril']
+        # V = features['V']
 
-        output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'D': D, 'V': V}, n=1000)
+        output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'scale_tril': L}, n=1000)
         # pred = self.scaler.inverse_transform(output)
         real_val = y[:, 11, :]
         # real_val = real_val.expand_as(output)
