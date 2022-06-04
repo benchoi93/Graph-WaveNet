@@ -10,7 +10,7 @@ from Fixed_mdn_engine import MDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
-parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY-EXTENDED', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
@@ -34,6 +34,7 @@ parser.add_argument('--expid', type=int, default=1, help='experiment id')
 parser.add_argument('--n_components', type=int, default=5, help='experiment id')
 parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
 parser.add_argument('--save_every', type=int, default=20, help='experiment id')
+parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
 
 args = parser.parse_args()
 
@@ -84,7 +85,7 @@ def main():
 
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit, n_components=args.n_components, reg_coef=args.reg_coef)
+                         adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors)
 
     print("start training...", flush=True)
     his_loss = []
@@ -173,7 +174,8 @@ def main():
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)
 
         if i % args.save_every == 0:
-            torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
+            # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
+            engine.save()
 
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
@@ -214,7 +216,8 @@ def main():
 
     log = 'On average over 12 horizons, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'
     print(log.format(np.mean(amae), np.mean(amape), np.mean(armse)))
-    torch.save(engine.model.state_dict(), args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid], 2))+".pth")
+    # torch.save(engine.model.state_dict(), args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid], 2))+".pth")
+    engine.save()
 
 
 if __name__ == "__main__":

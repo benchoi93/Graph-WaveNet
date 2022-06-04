@@ -133,6 +133,14 @@ class MDN_trainer():
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
 
+    def save(self):
+        torch.save(self.model.state_dict(), f'{self.logdir}/model.pt')
+        torch.save(self.fc_w.state_dict(), f'{self.logdir}/fc_w.pt')
+
+    def load(self, model_path, fc_w_path):
+        self.model.load_state_dict(torch.load(model_path))
+        self.fc_w.load_state_dict(torch.load(fc_w_path))
+
     def train(self, input, real_val):
         self.model.train()
         self.optimizer.zero_grad()

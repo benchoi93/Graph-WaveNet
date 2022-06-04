@@ -4,3 +4,8 @@ scipy
 pandas
 torch
 argparse
+tensorboard
+tensorboardX
+properscoring
+matplotlib
+seaborn

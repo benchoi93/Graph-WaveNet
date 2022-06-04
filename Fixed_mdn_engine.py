@@ -30,7 +30,7 @@ class FixedMDN(nn.Module):
 
 
 class LowRankMDNhead(nn.Module):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1):
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False):
         super(LowRankMDNhead, self).__init__()
 
         self.n_components = n_components
@@ -47,6 +47,8 @@ class LowRankMDNhead(nn.Module):
 
         self.output_dim = self.dim_w + self.dim_mu + self.dim_D + self.dim_V
 
+        self.consider_neighbors = consider_neighbors
+
     def forward(self, features, y):
         # input : features = dict of tensors
         #    - features['w'] : (batch_size, n_components)
@@ -55,7 +57,12 @@ class LowRankMDNhead(nn.Module):
         #    - features['V'] : (batch_size, n_components, n_vars, n_rank)
 
         dist = self.get_output_distribution(features)
+
         nll_loss = - dist.log_prob(y[:, :, self.pred_len - 1]).mean()
+        if self.consider_neighbors:
+            nll_loss = - dist.log_prob(y[:, :, self.pred_len - 2]).mean()
+            nll_loss += - dist.log_prob(y[:, :, self.pred_len]).mean()
+
         reg_loss = self.get_sparsity_regularization_loss(dist)
         loss = nll_loss + reg_loss * self.reg_coef
         return loss, nll_loss.item(), reg_loss.item()
@@ -106,8 +113,8 @@ class LowRankMDNhead(nn.Module):
 
 
 class WishartMDNhead(LowRankMDNhead):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1):
-        super(WishartMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef)
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False):
+        super(WishartMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef, consider_neighbors)
 
         self.n_components = n_components
         self.n_vars = n_vars
@@ -115,6 +122,7 @@ class WishartMDNhead(LowRankMDNhead):
         self.pred_len = pred_len
 
         self.reg_coef = reg_coef
+        self.consider_neighbors = consider_neighbors
 
     def get_output_distribution(self, features):
         # input : features
@@ -143,7 +151,7 @@ class WishartMDNhead(LowRankMDNhead):
 
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
-                 mode="cholesky", time_varying=False):
+                 mode="cholesky", time_varying=False, consider_neighbors=False):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -178,7 +186,7 @@ class MDN_trainer():
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
-        self.mdn_head = WishartMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
+        self.mdn_head = WishartMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef, consider_neighbors=consider_neighbors)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -206,9 +214,19 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}'
+        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
+
+    def save(self):
+        torch.save(self.model.state_dict(), f'{self.logdir}/model.pt')
+        torch.save(self.covariance.state_dict(), f'{self.logdir}/covariance.pt')
+        torch.save(self.fc_w.state_dict(), f'{self.logdir}/fc_w.pt')
+
+    def load(self, model_path, cov_path, fc_w_path):
+        self.model.load_state_dict(torch.load(model_path))
+        self.covariance.load_state_dict(torch.load(cov_path))
+        self.fc_w.load_state_dict(torch.load(fc_w_path))
 
     def train(self, input, real_val):
         self.model.train()
@@ -258,7 +276,8 @@ class MDN_trainer():
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
         real = real_val[:, :, 11]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
+        # output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
+        output = self.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L}).mean
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
@@ -314,7 +333,7 @@ class MDN_trainer():
         # output = [batch_size,12,num_nodes,1]
         # real = torch.unsqueeze(real_val, dim=1)
         real = real_val[:, :, 11]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
+        output = self.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L}).mean
         predict = self.scaler.inverse_transform(output)
         # predict = output
         # loss = self.loss(predict, real, 0.0)
@@ -339,8 +358,8 @@ class MDN_trainer():
         # real_val = real_val.expand_as(output)
 
         crps = torch.zeros(size=(y.shape[0], y.shape[2]))
-        for i in range(y.shape[0]):
-            for j in range(y.shape[2]):
+        for i in range(output.shape[1]):
+            for j in range(output.shape[2]):
                 pred = self.scaler.inverse_transform(output[:, i, j]).cpu().numpy()
                 crps[i, j] = ps.crps_ensemble(real_val[i, j].cpu().numpy(), pred)
 
