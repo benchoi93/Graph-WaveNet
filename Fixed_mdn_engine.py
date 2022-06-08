@@ -112,9 +112,9 @@ class LowRankMDNhead(nn.Module):
         return features['w'], features['mu'], features['D'], features['V']
 
 
-class WishartMDNhead(LowRankMDNhead):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False):
-        super(WishartMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef, consider_neighbors)
+class CholeskyMDNhead(LowRankMDNhead):
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False, outlier_distribution=True, outlier_distribution_kwargs=None):
+        super(CholeskyMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef, consider_neighbors)
 
         self.n_components = n_components
         self.n_vars = n_vars
@@ -123,12 +123,31 @@ class WishartMDNhead(LowRankMDNhead):
 
         self.reg_coef = reg_coef
         self.consider_neighbors = consider_neighbors
+        self.outlier_distribution = outlier_distribution
+
+        if outlier_distribution:
+            self.outlier_w = 1e-3
+            self.outlier_distribution_mu = 0
+            self.outlier_distribution_sigma = 2
+
+        self.training = True
 
     def get_output_distribution(self, features):
         # input : features
         # shape of input = (batch_size, hidden)
         # w, mu, cov = self.get_parameters(features)
         w, mu, scale_tril = self.get_parameters(features)
+
+        if self.outlier_distribution and self.training:
+            b = w.size(0)
+            w = torch.cat([w, self.outlier_w*torch.ones((b, 1, 1), device=w.device)], dim=1)
+            w = w / w.sum(1, keepdim=True)
+
+            mu = torch.cat([mu, self.outlier_distribution_mu * torch.ones((b, 1, self.n_vars), device=mu.device)], dim=1)
+
+            scale_tril = torch.cat([scale_tril, torch.diag_embed(self.outlier_distribution_sigma *
+                                                                 torch.ones((b, 1, self.n_vars), device=scale_tril.device))], dim=1)
+
         mix_dist = Dist.Categorical(w.squeeze(-1))
         com_dist = Dist.MultivariateNormal(
             loc=mu,
@@ -151,7 +170,7 @@ class WishartMDNhead(LowRankMDNhead):
 
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
-                 mode="cholesky", time_varying=False, consider_neighbors=False):
+                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -168,6 +187,7 @@ class MDN_trainer():
         # self.out_per_comp = 2
         self.mode = mode
         self.time_varying = time_varying
+        self.outlier_distribution = outlier_distribution
 
         if time_varying:
             if mode == "cholesky":
@@ -186,7 +206,8 @@ class MDN_trainer():
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
-        self.mdn_head = WishartMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef, consider_neighbors=consider_neighbors)
+        self.mdn_head = CholeskyMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef,
+                                        consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -229,6 +250,7 @@ class MDN_trainer():
         self.fc_w.load_state_dict(torch.load(fc_w_path))
 
     def train(self, input, real_val):
+        self.mdn_head.training = True
         self.model.train()
         self.optimizer.zero_grad()
         input = nn.functional.pad(input, (1, 0, 0, 0))
@@ -285,6 +307,7 @@ class MDN_trainer():
         return loss.item(), mape, rmse, nll_loss, reg_loss
 
     def eval(self, input, real_val):
+        self.mdn_head.training = False
         if self.model.training:
             self.specific = True
 
