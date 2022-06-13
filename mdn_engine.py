@@ -12,7 +12,7 @@ from tensorboardX import SummaryWriter
 
 
 class MDN_trainer():
-    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef):
+    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, tau):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -33,9 +33,20 @@ class MDN_trainer():
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
 
-        self.model.to(device)
+        self.fc_S = nn.Sequential(
+            nn.Linear(num_nodes*n_components, nhid),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(nhid, nhid),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(nhid, num_rank)
+        )
 
-        self.optimizer = optim.Adam(list(self.model.parameters()), lr=lrate, weight_decay=wdecay)
+        self.model.to(device)
+        self.fc_S.to(device)
+
+        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_S.parameters()), lr=lrate, weight_decay=wdecay)
         # self.loss = util.masked_mae
         self.scaler = scaler
         self.clip = 5
@@ -67,9 +78,12 @@ class MDN_trainer():
         V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
 
-        V = V.view(-1, self.num_nodes * self.n_components, self.num_rank)
+        V = V.reshape(-1, self.num_nodes * self.n_components, self.num_rank)  # B X NT X R
         # use Woodbury identity to compute the covariance matrix
-        cov = torch.einsum("bij, bjk -> bik", V, V.transpose(-1, -2))  # TODO: plus sigma^2 I
+        # cov = torch.einsum("bij, bjk -> bik", V, V.transpose(-1, -2))  # TODO: plus sigma^2 I
+
+        V = V.view(-1,  self.num_rank,  self.num_nodes * self.n_components)  # B X R X NT
+        S = self.fc_S(V)  # B X R X R
 
         scaled_real_val = self.scaler.transform(real_val)
 
