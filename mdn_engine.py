@@ -67,6 +67,10 @@ class MDN_trainer():
         V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
 
+        V = V.view(-1, self.num_nodes * self.n_components, self.num_rank)
+        # use Woodbury identity to compute the covariance matrix
+        cov = torch.einsum("bij, bjk -> bik", V, V.transpose(-1, -2))  # TODO: plus sigma^2 I
+
         scaled_real_val = self.scaler.transform(real_val)
 
         # change this part to compute (Y- K_yx K_xx^-1 X)
