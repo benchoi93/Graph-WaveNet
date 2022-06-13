@@ -21,7 +21,7 @@ parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
 parser.add_argument('--nhid', type=int, default=16, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
-parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
+parser.add_argument('--num_nodes', type=int, default=325, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
@@ -49,19 +49,21 @@ def main():
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
 
-    target_sensors = ['404444',
-                      '400582',
-                      '400097',
-                      '401224',
-                      '400828',
-                      '400648',
-                      '404434',
-                      '400222',
-                      '400952',
-                      '401210',
-                      '400507',
-                      '400185'
-                      ]
+    # target_sensors = ['404444',
+    #                   '400582',
+    #                   '400097',
+    #                   '401224',
+    #                   '400828',
+    #                   '400648',
+    #                   '404434',
+    #                   '400222',
+    #                   '400952',
+    #                   '401210',
+    #                   '400507',
+    #                   '400185'
+    #                   ]
+
+    target_sensors = sensor_ids
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
