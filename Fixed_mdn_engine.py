@@ -377,7 +377,7 @@ class MDN_trainer():
 
         output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'scale_tril': L}, n=1000)
         # pred = self.scaler.inverse_transform(output)
-        real_val = y[:, 11, :]
+        real_val = y[:, :, 11]
         # real_val = real_val.expand_as(output)
 
         crps = torch.zeros(size=(y.shape[0], y.shape[2]))
