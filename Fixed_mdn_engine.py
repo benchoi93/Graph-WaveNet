@@ -170,7 +170,7 @@ class CholeskyMDNhead(LowRankMDNhead):
 
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
-                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True):
+                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -182,6 +182,7 @@ class MDN_trainer():
         self.dim_mu = n_components * num_nodes
         self.dim_V = n_components * num_nodes * num_rank
         self.dim_D = n_components * num_nodes
+        self.pred_len = pred_len
 
         # dim_out = self.dim_w + self.dim_mu + self.dim_V + self.dim_D
         # self.out_per_comp = 2
@@ -206,7 +207,7 @@ class MDN_trainer():
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
-        self.mdn_head = CholeskyMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef,
+        self.mdn_head = CholeskyMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef, pred_len=pred_len,
                                         consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
@@ -235,7 +236,9 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
+        # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
+        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{pred_len}'
+
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
 
@@ -297,7 +300,7 @@ class MDN_trainer():
         self.optimizer.step()
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
-        real = real_val[:, :, 11]
+        real = real_val[:, :, self.pred_len - 1]
         # output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
         output = self.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L}).mean
         predict = self.scaler.inverse_transform(output)
@@ -355,7 +358,7 @@ class MDN_trainer():
         # output = output.transpose(1, 3)
         # output = [batch_size,12,num_nodes,1]
         # real = torch.unsqueeze(real_val, dim=1)
-        real = real_val[:, :, 11]
+        real = real_val[:, :, self.pred_len - 1]
         output = self.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L}).mean
         predict = self.scaler.inverse_transform(output)
         # predict = output
