@@ -1,3 +1,4 @@
+from inspect import Parameter
 import torch.optim as optim
 from model import *
 import util
@@ -26,13 +27,12 @@ class FixedMDN(nn.Module):
         super(FixedMDN, self).__init__()
         self.dim_L = (n_components, n_vars, n_vars)
 
-        self._L = nn.Parameter(torch.diag_embed(torch.randn(*self.dim_L[:2])))
+        self._L = nn.Parameter(torch.randn(*self.dim_L[:2]))
 
     @property
     def L(self):
         # delete upper triangular part of self._L
-
-        return torch.tril(self._L)
+        return torch.diag_embed(self._L)
 
 
 class LowRankMDNhead(nn.Module):
@@ -72,6 +72,21 @@ class LowRankMDNhead(nn.Module):
         reg_loss = self.get_sparsity_regularization_loss(dist)
         loss = nll_loss + reg_loss * self.reg_coef
         return loss, nll_loss.item(), reg_loss.item()
+
+        # w, mu, L = self.get_parameters(features)
+        # # U = torch.inverse(L)
+        # U = L.transpose(-1, -2)
+        # y = y[:, :, self.pred_len - 1]
+
+        # # torch.triangular_solve((y.unsqueeze(1).expand_as(mu).reshape(320, 12)-mu.view(320, 325)
+        # #                         ).unsqueeze(-1), L.view(320, 12, 325).transpose(-1, -2), upper=True)
+
+        # logdet = torch.log(torch.diagonal(U, dim1=-1, dim2=-2)).sum(-1)
+        # S = (torch.norm(torch.einsum("bcij, bcjk -> bcik", U, (y.unsqueeze(1).expand_as(mu)-mu).unsqueeze(-1)), p=2, dim=2).squeeze(-1)).pow(2)
+        # log_w = torch.log(w).squeeze(-1)
+
+        # Z = log_w - 0.5 * S + logdet
+        # NLL = -torch.logsumexp(Z, dim=-1).mean()
 
     def get_sparsity_regularization_loss(self, dist):
         # reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
@@ -384,7 +399,7 @@ class MDN_trainer():
         L = features['scale_tril']
         # V = features['V']
 
-        output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'scale_tril': L}, n=1000)
+        output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'scale_tril': L}, n=100)
         # pred = self.scaler.inverse_transform(output)
         # real_val = y[:, :, 11]
         real_val = y[:, :, self.pred_len - 1]
