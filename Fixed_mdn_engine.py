@@ -70,8 +70,16 @@ class LowRankMDNhead(nn.Module):
             nll_loss += - dist.log_prob(y[:, :, self.pred_len]).mean()
 
         reg_loss = self.get_sparsity_regularization_loss(dist)
-        loss = nll_loss + reg_loss * self.reg_coef
-        return loss, nll_loss.item(), reg_loss.item()
+
+        target = y[:, :, self.pred_len - 1]
+        # min_mse, _ = ((dist.mean - target)**2).min(1)
+        # min_mse, _ = ((features["mu"] - target.unsqueeze(1)) ** 2).min(1)
+        mse_loss = ((dist.mean - target)**2).mean(1).mean()
+
+        loss = nll_loss + reg_loss * self.reg_coef + mse_loss*100
+        # loss = mse_loss
+
+        return loss, nll_loss.item(), reg_loss.item(), mse_loss.item()
 
     def get_sparsity_regularization_loss(self, dist):
         # reg_loss = ((dist.component_distribution.precision_matrix) ** 2).mean()
@@ -119,7 +127,7 @@ class LowRankMDNhead(nn.Module):
 
 
 class CholeskyMDNhead(LowRankMDNhead):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False, outlier_distribution=True, outlier_distribution_kwargs=None):
+    def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1, consider_neighbors=False, outlier_distribution=False, outlier_distribution_kwargs=None):
         super(CholeskyMDNhead, self).__init__(n_components, n_vars, n_rank, pred_len, reg_coef, consider_neighbors)
 
         self.n_components = n_components
@@ -272,6 +280,7 @@ class MDN_trainer():
             L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)]) + 1
 
         mus = output[:, :, :, 0]
+        mus = torch.stack([mus[:, :, 0]] * mus.shape[-1], -1)
 
         V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
@@ -299,7 +308,7 @@ class MDN_trainer():
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
+        loss, nll_loss, reg_loss, mse_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
         loss.backward()
         if self.clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
@@ -313,7 +322,7 @@ class MDN_trainer():
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
 
-        return loss.item(), mape, rmse, nll_loss, reg_loss
+        return loss.item(), mape, rmse, nll_loss, reg_loss, mse_loss
 
     def eval(self, input, real_val):
         self.mdn_head.training = False
@@ -331,6 +340,7 @@ class MDN_trainer():
             L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)]) + 1
 
         mus = output[:, :, :, 0]
+        mus = torch.stack([mus[:, :, 0]] * mus.shape[-1], -1)
 
         V = output[:, :, :, 1:]
         V = torch.einsum('abcd -> acbd', V)
@@ -358,7 +368,8 @@ class MDN_trainer():
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
+        # loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
+        loss, nll_loss, reg_loss, mse_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
 
         # output = self.model(input)
         # output = output.transpose(1, 3)
@@ -372,10 +383,10 @@ class MDN_trainer():
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
 
-        if self.specific:
-            self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L}, y=real_val)
+        # if self.specific:
+        #     self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L}, y=real_val)
 
-        return loss.item(), mape, rmse, nll_loss, reg_loss
+        return loss.item(), mape, rmse, nll_loss, reg_loss, mse_loss
 
     def specific_eval(self, features, y):
         self.specific = False
@@ -390,7 +401,7 @@ class MDN_trainer():
         real_val = y[:, :, self.pred_len - 1]
         # real_val = real_val.expand_as(output)
 
-        crps = torch.zeros(size=(y.shape[0], y.shape[2]))
+        crps = torch.zeros(size=(y.shape[0], y.shape[1]))
         for i in range(output.shape[1]):
             for j in range(output.shape[2]):
                 pred = self.scaler.inverse_transform(output[:, i, j]).cpu().numpy()
