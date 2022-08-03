@@ -156,8 +156,12 @@ def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size
     for category in ['train', 'val', 'test']:
         cat_data = np.load(os.path.join(dataset_dir, category + '.npz'))
         if target_sensor_inds is not None:
-            data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :]
-            data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :]
+            if dataset_dir == "data/PEMS-BAY-2022":
+                data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :][:, :, :, (0, 2)]
+                data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :][:, :, :, (0, 2)]
+            else:
+                data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :]
+                data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :]
         else:
             data['x_' + category] = cat_data['x']
             data['y_' + category] = cat_data['y']
