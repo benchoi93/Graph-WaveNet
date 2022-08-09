@@ -72,7 +72,6 @@ class LowRankMDNhead(nn.Module):
         com_dist = Dist.LowRankMultivariateNormal(
             loc=mu,
             cov_factor=V,
-            # cov_diag=torch.ones_like(D) * 0.1
             cov_diag=D
         )
 
@@ -85,11 +84,12 @@ class LowRankMDNhead(nn.Module):
 
 
 class MDN_trainer():
-    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef):
+    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef, pred_len):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
         self.num_rank = num_rank
+        self.pred_len = pred_len
 
         self.device = device
 
@@ -129,21 +129,26 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}'
+        self.logdir = f'./logs/GWNMDN_LowRankVarying_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{pred_len}'
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
 
-    def save(self):
+    def save(self, best=False):
+        if best:
+            torch.save(self.model.state_dict(), f'{self.logdir}/best_model.pt')
+            torch.save(self.fc_w.state_dict(), f'{self.logdir}/best_fc_w.pt')
+
         torch.save(self.model.state_dict(), f'{self.logdir}/model.pt')
         torch.save(self.fc_w.state_dict(), f'{self.logdir}/fc_w.pt')
 
-    def load(self, model_path, fc_w_path):
+    def load(self, model_path, cov_path, fc_w_path):
         self.model.load_state_dict(torch.load(model_path))
         self.fc_w.load_state_dict(torch.load(fc_w_path))
 
-    def train(self, input, real_val):
-        self.model.train()
-        self.optimizer.zero_grad()
+    def train(self, input, real_val, eval=False):
+        if not eval:
+            self.model.train()
+
         input = nn.functional.pad(input, (1, 0, 0, 0))
         output = self.model(input)
         output = output.transpose(1, 3)
@@ -170,86 +175,86 @@ class MDN_trainer():
 
         scaled_real_val = self.scaler.transform(real_val)
         loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
-        loss.backward()
-        if self.clip is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
-        self.optimizer.step()
+
+        if not eval:
+            self.optimizer.zero_grad()
+            loss.backward()
+            if self.clip is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+            self.optimizer.step()
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
-        real = real_val[:, :, 11]
+        real = real_val[:, :, self.pred_len - 1]
         output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'D': D, 'V': V})
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
+        mse = util.masked_mse(predict, real, 0.0).item()
 
-        return loss.item(), mape, rmse, nll_loss, reg_loss
+        info = {
+            "w": w,
+            "mu": mus,
+            "D": D,
+            "V": V,
+            "loss": loss.item(),
+            "mape": mape,
+            "rmse": rmse,
+            "nll_loss": nll_loss,
+            "reg_loss": reg_loss,
+            "mse_loss": mse,
+            # "crps": crps
+        }
+
+        return info
 
     def eval(self, input, real_val):
-        if self.model.training:
-            self.specific = True
+        with torch.no_grad():
+            info = self.train(input, real_val, eval=True)
 
-        self.model.eval()
-        input = nn.functional.pad(input, (1, 0, 0, 0))
-        output = self.model(input)
-        output = output.transpose(1, 3)
-        output = output.view(-1, self.num_nodes, self.n_components, self.out_per_comp)
-        mus = output[:, :, :, 0]
-        D = output[:, :, :, 1]
-        # D activate ELU
-        D = nn.functional.elu(D) + 1
-
-        V = output[:, :, :, 2:]
-
-        mus = torch.einsum('abc->acb', mus)
-        D = torch.einsum('abc -> acb', D)
-        V = torch.einsum('abcd -> acbd', V)
-
-        output = torch.einsum("bijk->bjik", output)
-        output = output.reshape(-1, self.n_components, self.num_nodes * self.out_per_comp)
-        w = self.fc_w(output)
-        # w activate softmax0
-        w = nn.functional.softmax(w, dim=1)
-
+        w = info['w']
+        mus = info['mu']
+        D = info['D']
+        V = info['V']
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
 
-        # output = self.model(input)
-        # output = output.transpose(1, 3)
-        #output = [batch_size,12,num_nodes,1]
-        # real = torch.unsqueeze(real_val, dim=1)
-        real = real_val[:, :, 11]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'D': D, 'V': V})
-        predict = self.scaler.inverse_transform(output)
-        # predict = output
-        # loss = self.loss(predict, real, 0.0)
-        mape = util.masked_mape(predict, real, 0.0).item()
-        rmse = util.masked_rmse(predict, real, 0.0).item()
+        crps = self.specific_eval(features={'w': w, 'mu': mus, 'D': D, 'V': V, 'target': scaled_real_val})
 
-        if self.specific:
-            self.specific_eval(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=real_val)
+        info = {
+            "w": info["w"],
+            "mu": info["mu"],
+            "D": info["D"],
+            "V": info["V"],
+            "loss": info["loss"],
+            "mape": info["mape"],
+            "rmse": info["rmse"],
+            "nll_loss": info["nll_loss"],
+            "reg_loss": info["reg_loss"],
+            "mse_loss": info["mse_loss"],
+            "crps": crps
+        }
 
-        return loss.item(), mape, rmse, nll_loss, reg_loss
+        return info
 
-    def specific_eval(self, features, y):
+    def specific_eval(self, features):
         self.specific = False
-        w = features['w']
-        mu = features['mu']
-        D = features['D']
-        V = features['V']
+        output = self.mdn_head.sample(features=features, n=100)
+        scaled_real_val = features['target']
+        real_val = self.scaler.inverse_transform(scaled_real_val)
+        real_val = real_val[:, :, self.pred_len - 1]
 
-        output = self.mdn_head.sample(features={'w': w, 'mu': mu, 'D': D, 'V': V}, n=1000)
-        # pred = self.scaler.inverse_transform(output)
-        real_val = y[:, 11, :]
-        # real_val = real_val.expand_as(output)
+        s, b, n = output.shape
 
-        crps = torch.zeros(size=(y.shape[0], y.shape[2]))
-        for i in range(y.shape[0]):
-            for j in range(y.shape[2]):
+        crps = torch.zeros(size=(b, n))
+        for i in range(b):
+            for j in range(n):
                 pred = self.scaler.inverse_transform(output[:, i, j]).cpu().numpy()
+                pred[pred < 0] = 0
                 crps[i, j] = ps.crps_ensemble(real_val[i, j].cpu().numpy(), pred)
+        # self.summary.add_scalar('val/crps', crps.mean().item(), self.cnt)
 
-        self.summary.add_scalar('val/crps', crps.mean().item(), self.cnt)
+        return crps.mean()
 
+    def plot_cov(self, features):
         dist = self.mdn_head.get_output_distribution(features)
         sample_cov = dist.component_distribution.covariance_matrix[0]
         sample_prec = dist.component_distribution.precision_matrix[0]

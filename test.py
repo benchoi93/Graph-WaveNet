@@ -6,8 +6,8 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
-# from Fixed_mdn_engine import MDN_trainer
-from Diag_Fixed_mdn_engine import MDN_trainer
+from Fixed_mdn_engine import MDN_trainer
+# from Diag_Fixed_mdn_engine import MDN_trainer
 import torch.nn as nn
 import seaborn as sns
 import properscoring as ps
@@ -48,7 +48,7 @@ args = parser.parse_args()
 # GWN_MDN_20220607-133432_N5_R5_reg0.001_nhid4_neiFalse
 # GWN_MDN_20220607-133432_N5_R5_reg0.001_nhid4_neiTrue
 
-model_path = "logs/GWN_MDN_20220620-200048_N5_R5_reg0.0_nhid4_pred12"
+model_path = "logs/GWN_MDN_20220730-223937_N10_R5_reg0.0_nhid16_pred12_rho0.1"
 
 
 def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes):
@@ -60,6 +60,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     reg_coef = float(params[2].split("reg")[1])
     nhid = int(params[3].split("nhid")[1])
     pred_len = int(params[4].split("pred")[1])
+    rho = float(params[5].split("rho")[1])
 
     # set seed
     # torch.manual_seed(args.seed)
@@ -88,74 +89,61 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
 
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, num_nodes, num_rank, nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit, n_components=n_components, reg_coef=reg_coef, pred_len=pred_len)
+                         adjinit, n_components=n_components, reg_coef=reg_coef, pred_len=pred_len,
+                         rho=rho)
 
     engine.load(model_path=model_path + '/model.pt',
                 cov_path=model_path + '/covariance.pt',
                 fc_w_path=model_path + '/fc_w.pt')
 
     results = []
-    for iter, (x, y) in tqdm(enumerate(dataloader['test_loader'].get_iterator()), total=dataloader['test_loader'].num_batch):
-        testx = torch.Tensor(x).to(device)
-        testx = testx.transpose(1, 3)
-        testy = torch.Tensor(y).to(device)
-        testy = testy.transpose(1, 3)
-        # break
-
-        input = testx
-        real_val = testy[:, 0, :, :]
-
-        # metrics = engine.eval(input, testy[:, 0, :, :])
+    for iter, (x, y) in tqdm(enumerate(dataloader['val_loader'].get_iterator()), total=dataloader['val_loader'].num_batch):
         with torch.no_grad():
-            input = nn.functional.pad(input, (1, 0, 0, 0))
-            output = engine.model(input)
-            output = output.transpose(1, 3)
+            testx = torch.Tensor(x).to(device)
+            testx = testx.transpose(1, 3)
+            testy = torch.Tensor(y).to(device)
+            testy = testy.transpose(1, 3)
+            info = engine.eval(testx, testy[:, 0, :, :])
 
-            output = output.view(-1, engine.num_nodes, engine.n_components, engine.out_per_comp)
-            L = torch.tril(engine.covariance.L.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
-            L[:, :, torch.arange(engine.num_nodes), torch.arange(engine.num_nodes)] = torch.nn.functional.elu(
-                L[:, :, torch.arange(engine.num_nodes), torch.arange(engine.num_nodes)]) + 1
+        w = info["w"]
+        w = w.exp()
+        mus = info["mu"]
+        L = info["scale_tril"]
 
-            mus = output[:, :, :, 0]
-            mus = torch.stack([mus[:, :, 0]] * mus.shape[-1], -1)
+        real_val = testy[:, 0, :, :]
+        real = real_val[:, :, engine.pred_len - 1]
+        target = testy[:, 0, :, :]
 
-            V = output[:, :, :, 1:]
-            V = torch.einsum('abcd -> acbd', V)
+        dist = engine.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L, "target": target})
 
-            mus = torch.einsum('abc->acb', mus)
-            output = output.reshape(-1, engine.n_components, engine.num_nodes * engine.out_per_comp)
-            w = engine.fc_w(output)
-            w = nn.functional.softmax(w, dim=1)
+        output = engine.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L, "target": target}).mean
+        predict = engine.scaler.inverse_transform(output)
+        # (predict<0).sum()
 
-            scaled_real_val = engine.scaler.transform(real_val)
-            loss, nll_loss, reg_loss, mse_loss = engine.mdn_head.forward(features={'w': w, 'mu': mus, 'scale_tril': L}, y=scaled_real_val)
+        mape = util.masked_mape(predict, real, 0.0).item()
+        rmse = util.masked_rmse(predict, real, 0.0).item()
 
-            real = real_val[:, :, engine.pred_len - 1]
-            output = engine.mdn_head.get_output_distribution(features={'w': w, 'mu': mus, 'scale_tril': L}).mean
-            predict = engine.scaler.inverse_transform(output)
+        samples = engine.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L, "target": target}, n=1000)
+        pred_samples = engine.scaler.inverse_transform(samples)
+        pred_samples[pred_samples < 0] = 0
 
-            mape = util.masked_mape(predict, real, 0.0).item()
-            rmse = util.masked_rmse(predict, real, 0.0).item()
+        crps = torch.zeros(size=(y.shape[0], y.shape[2]))
+        for i in range(pred_samples.shape[1]):
+            for j in range(pred_samples.shape[2]):
+                pred = pred_samples[:, i, j]
+                crps[i, j] = ps.crps_ensemble(real[i, j].cpu().numpy(), pred)
 
-            output = engine.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L}, n=1000)
-
-            crps = torch.zeros(size=(y.shape[0], y.shape[2]))
-            for i in range(output.shape[1]):
-                for j in range(output.shape[2]):
-                    pred = engine.scaler.inverse_transform(output[:, i, j]).cpu().numpy()
-                    crps[i, j] = ps.crps_ensemble(real[i, j].cpu().numpy(), pred)
-
-            results.append(
-                {
-                    "rmse": rmse,
-                    "mape": mape,
-                    "crps": crps,
-                    "mse": mse_loss,
-                    "crps_mean": crps.mean().item(),
-                    "len": crps.shape[0],
-                    "nll": nll_loss
-                }
-            )
+        results.append(
+            {
+                "rmse": rmse,
+                "mape": mape,
+                "crps": crps,
+                "mse": info['mse_loss'],
+                "crps_mean": crps.mean().item(),
+                "len": crps.shape[0],
+                "nll": info["nll_loss"]
+            }
+        )
 
     # results = [{'rmse':x['rmse'] , 'mape':x['mape'] , 'crps' : x['crps'] , 'crps_mean':x['crps'].mean().item() , 'len' : x['crps'].shape[0]} for x in results]
 
@@ -279,7 +267,8 @@ if __name__ == "__main__":
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
 
-    file_list = [x for x in os.listdir("logs") if "diag" in x]
+    # file_list = [x for x in os.listdir("logs")]
+    file_list = [x for x in os.listdir("logs") if "0808" in x]
     # file_list = [x for x in os.listdir("logs") if "GWN_MDNdiag_20220623" in x]
     # file_list = ["GWN_MDNdiag_20220624-132309_N1_R5_reg0.01_nhid4_pred36", "GWN_MDNdiag_20220624-132314_N1_R5_reg0.001_nhid4_pred36"]
     print(file_list)
@@ -290,7 +279,7 @@ if __name__ == "__main__":
             f"logs/{file}", dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes)
 
         result = pd.concat([result, pd.DataFrame([[file, result_rmse, result_mape, result_crps, result_nll]])], axis=0)
-        result.to_csv("out_with_nll_0726.csv")
+        result.to_csv("out_with_nll_0808.csv")
         # except:
         #     print(file)
         #     continue

@@ -6,12 +6,12 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
-# from Fixed_mdn_engine import MDN_trainer
-from Diag_Fixed_mdn_engine import MDN_trainer
+from Fixed_mdn_engine import MDN_trainer
+# from Diag_Fixed_mdn_engine import MDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
-parser.add_argument('--data', type=str, default='data/PEMS-BAY-3hr', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
@@ -38,6 +38,9 @@ parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
 parser.add_argument("--outlier_distribution", action="store_true", help="outlier_distribution")
 parser.add_argument("--pred-len", type=int, default=12)
+parser.add_argument("--rho", type=float, default=0.1)
+parser.add_argument("--diag", action="store_true")
+parser.add_argument("--mse_coef", type=float, default=0.1)
 
 args = parser.parse_args()
 
@@ -88,15 +91,34 @@ def main():
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
     #                  adjinit)
 
+    # engine = MDN_trainer(scaler, args.in_dim,
+    #                      args.seq_length,
+    #                      args.num_nodes,
+    #                      args.num_rank,
+    #                      args.nhid,
+    #                      args.dropout,
+    #                      args.learning_rate,
+    #                      args.weight_decay,
+    #                      device, supports,
+    #                      args.gcn_bool,
+    #                      args.addaptadj,
+    #                      adjinit,
+    #                      n_components=args.n_components,
+    #                      reg_coef=args.reg_coef,
+    #                      pred_len=args.pred_len)
+
     engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
-                         outlier_distribution=args.outlier_distribution, pred_len=args.pred_len)
+                         outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
+                         mse_coef=args.mse_coef)
 
     print("start training...", flush=True)
     his_loss = []
     val_time = []
     train_time = []
+
+    best_val_loss = float('inf')
     for i in range(1, args.epochs+1):
         # if i % 10 == 0:
         #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
@@ -108,6 +130,7 @@ def main():
         train_mse_loss = []
         train_nll_loss = []
         train_reg_loss = []
+        # train_crps_loss = []
         t1 = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
@@ -116,12 +139,13 @@ def main():
             trainy = torch.Tensor(y).to(device)
             trainy = trainy.transpose(1, 3)
             metrics = engine.train(trainx, trainy[:, 0, :, :])
-            train_loss.append(metrics[0])
-            train_mape.append(metrics[1])
-            train_rmse.append(metrics[2])
-            train_nll_loss.append(metrics[3])
-            train_reg_loss.append(metrics[4])
-            train_mse_loss.append(metrics[5])
+            train_loss.append(metrics['loss'])
+            train_mape.append(metrics['mape'])
+            train_rmse.append(metrics['rmse'])
+            train_nll_loss.append(metrics['nll_loss'])
+            train_reg_loss.append(metrics['reg_loss'])
+            train_mse_loss.append(metrics['mse_loss'])
+            # train_crps_loss.append(metrics["crps"])
 
             if iter % args.print_every == 0:
                 log = 'Iter: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}'
@@ -135,20 +159,27 @@ def main():
         valid_nll_loss = []
         valid_reg_loss = []
         valid_mse_loss = []
+        valid_crps_loss = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator(171)):
+        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)
             testy = torch.Tensor(y).to(device)
             testy = testy.transpose(1, 3)
+
             metrics = engine.eval(testx, testy[:, 0, :, :])
-            valid_loss.append(metrics[0])
-            valid_mape.append(metrics[1])
-            valid_rmse.append(metrics[2])
-            valid_nll_loss.append(metrics[3])
-            valid_reg_loss.append(metrics[4])
-            valid_mse_loss.append(metrics[5])
+
+            valid_loss.append(metrics['loss'])
+            valid_mape.append(metrics['mape'])
+            valid_rmse.append(metrics['rmse'])
+            valid_nll_loss.append(metrics['nll_loss'])
+            valid_reg_loss.append(metrics['reg_loss'])
+            valid_mse_loss.append(metrics['mse_loss'])
+            valid_crps_loss.append(metrics["crps"])
+
+            # if iter == 0:
+            #     engine.plot_cov(metrics)
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -165,6 +196,10 @@ def main():
         mvalid_rmse = np.mean(valid_rmse)
         mvalid_nll_loss = np.mean(valid_nll_loss)
         mvalid_reg_loss = np.mean(valid_reg_loss)
+
+        # mtrain_crps_loss = np.mean(train_crps_loss)
+        mvalid_crps_loss = np.mean(valid_crps_loss)
+
         his_loss.append(mvalid_loss)
 
         engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
@@ -172,8 +207,10 @@ def main():
 
         engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
         engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
+        # engine.summary.add_scalar('errors/train_crps', mtrain_crps_loss, i)
         engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
         engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
+        engine.summary.add_scalar('errors/val_crps', mvalid_crps_loss, i)
 
         engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
         engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
@@ -182,12 +219,21 @@ def main():
         engine.summary.add_scalar('loss/train_mse_loss', np.mean(train_mse_loss), i)
         engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
 
+        # engine.summary.add_scalar('loss/rho', torch.sigmoid(engine.covariance.rho).item(), i)
+
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            engine.save()
+            if best_val_loss > mvalid_loss:
+                best_val_loss = mvalid_loss
+                engine.save(best=True)
+                print("Saved best model")
+
+            else:
+                engine.save()
+                print("Saved model")
 
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
