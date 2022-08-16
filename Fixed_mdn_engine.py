@@ -383,10 +383,10 @@ class MDN_trainer():
         L = torch.tril(self.covariance.L.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
         mus = output[:, :, :, 0]
 
-        mu0 = mus[:, :, 0]
-        mus[:, :, 1:] += mu0.unsqueeze(-1).expand(-1, -1, self.n_components-1)
-        L0 = L[:, 0, ...]
-        L[:, 1:, ...] += L0.unsqueeze(1).expand(-1, self.n_components-1, -1, -1)
+        # mu0 = mus[:, :, 0]
+        # mus[:, :, 1:] += mu0.unsqueeze(-1).expand(-1, -1, self.n_components-1)
+        # L0 = L[:, 0, ...]
+        # L[:, 1:, ...] += L0.unsqueeze(1).expand(-1, self.n_components-1, -1, -1)
 
         L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)] = torch.nn.functional.elu(
             L[:, :, torch.arange(self.num_nodes), torch.arange(self.num_nodes)]) + 1

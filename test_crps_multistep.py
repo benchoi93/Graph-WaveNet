@@ -1,3 +1,4 @@
+from matplotlib import animation
 import sys
 import pandas as pd
 import os
@@ -10,7 +11,7 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
-from Fixed_mdn_engine import MDN_trainer
+from Fixed_mdn_engine_multistep import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
 import torch.nn as nn
 import seaborn as sns
@@ -18,6 +19,8 @@ import properscoring as ps
 
 os.chdir("/app/")
 sys.argv = ['']
+parser = argparse.ArgumentParser()
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cpu', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
@@ -49,6 +52,7 @@ parser.add_argument("--outlier_distribution", action="store_true", help="outlier
 parser.add_argument("--pred-len", type=int, default=12)
 parser.add_argument("--rho", type=float, default=0.1)
 parser.add_argument("--diag", action="store_true")
+parser.add_argument("--mse_coef", type=float, default=0.1)
 
 args = parser.parse_args()
 
@@ -61,17 +65,18 @@ args = parser.parse_args()
 # flist = os.listdir("logs")
 
 # GWNMDN = flist[0]
-GWNMDN = 'logs/GWN_MDN_20220808-182736_N10_R5_reg3.0_nhid16_pred24_rho0.1_diagFalse_mse_coef100.0'
-params = GWNMDN.split("_")[4:]
+# GWNMDN = 'logs/GWNMDN_multistep_20220811-144913_N10_R5_reg0.0_nhid16_pred[2, 5, 8, 11]_rho0.01_diagFalse_msecoef1.0'
+GWNMDN = "logs/GWNMDN_multistep_20220814-235047_N10_R5_reg0.0_nhid16_pred[2, 5, 8, 11]_rho0.01_diagFalse_msecoef1.0"
+params = GWNMDN.split("_")[3:]
 
 n_components = int(params[0].split("N")[1])
 num_rank = int(params[1].split("R")[1])
 reg_coef = float(params[2].split("reg")[1])
 nhid = int(params[3].split("nhid")[1])
-pred_len = int(params[4].split("pred")[1])
+pred_len = [2, 5, 8, 11]
 rho = float(params[5].split("rho")[1])
-diag = bool(params[6].split("diag")[1])
-mse_coef = float(params[8].split("coef")[1])
+diag = True if params[6].split("diag")[1] == "True" else False
+mse_coef = float(params[7].split("coef")[1])
 
 args.n_components = n_components
 args.nhid = nhid
@@ -131,12 +136,13 @@ adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
                      args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                      adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
-                     outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag)
+                     outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
+                     mse_coef=args.mse_coef)
 
 
-engine.load(model_path=args.model_path + '/best_model.pt',
+engine.load(model_path=args.model_path + '/model.pt',
             cov_path=args.model_path + '/covariance.pt',
-            fc_w_path=args.model_path + '/best_fc_w.pt')
+            fc_w_path=args.model_path + '/fc_w.pt')
 
 
 result = []
@@ -152,14 +158,24 @@ for iter, (x, y) in tqdm(enumerate(dataloader['test_loader'].get_iterator())):
 
     w = info["w"]
     mus = info["mu"]
-    L = info["scale_tril"]
+    L = info["scale_tril"][0]
 
     time_y = testy[:, 1, 0, -1]
-    out_y = testy[:, 0, :, engine.pred_len - 1]
+    out_y = testy[:, 0, :, engine.pred_len]
     target = testy[:, 0, :, :]
 
-    mu_out = mus[:, :, :]
+    out_y = out_y.reshape(out_y.shape[0], -1)
+
+    mu_out = mus[:, :]
     w_out = w[:, :]
+
+    dist = engine.mdn_head.get_output_distribution(
+        features={
+            "w": w,
+            "mu": mus,
+            "scale_tril": L.unsqueeze(0).expand(out_y.shape[0], -1, -1, -1)
+        }
+    )
 
     # L = torch.tril(engine.covariance.L.unsqueeze(0))
     # mu0 = mus[:, 0, :]
@@ -182,13 +198,9 @@ for iter, (x, y) in tqdm(enumerate(dataloader['test_loader'].get_iterator())):
         dist_i = engine.mdn_head.get_output_distribution(features={
             'w': w_out_i,
             'mu': mu_out_i,
-            'scale_tril': L,
+            'scale_tril': L.unsqueeze(0),
             'target': engine.scaler.transform(target_i)
         })
-        # dist_i = torch.distributions.MultivariateNormal(
-        #     loc=mu_out_i,
-        #     scale_tril=L
-        # )
 
         sample_i = [dist_i.sample() for i in range(100)]
         # sample_i = torch.cat(sample_i, dim=0)
@@ -199,108 +211,110 @@ for iter, (x, y) in tqdm(enumerate(dataloader['test_loader'].get_iterator())):
         sample_i[sample_i < 0] = 0
 
         for c in range(12):
-            score = ps.crps_ensemble(out_y_i[0, c], sample_i[:, c])
-            if score < 0:
-                print(i, c)
-                break
-            # score = 0
-            mean_y_i = np.mean(sample_i[:, c])
-            mu_out_i_scaled = engine.scaler.inverse_transform(mu_out_i[0, :, c].cpu().numpy())
-            result.append([cnt, time_y_i.item(), c, out_y_i[0, c].item(), np.log(score), mean_y_i, mu_out_i_scaled, w_out_i])
+            for t in range(4):
+                score = ps.crps_ensemble(out_y_i[0, c * 4 + t].cpu(), sample_i[:, c * 4 + t])
+                if score < 0:
+                    print(i, c)
+                mean_y_i = np.mean(sample_i[:, c * 4 + t])
+                mu_out_i_scaled = engine.scaler.inverse_transform(mu_out_i[0, c * 4 + t].cpu().numpy())
+                result.append([cnt, time_y_i.item(), c, t, out_y_i[0, c * 4 + t].cpu().item(),
+                              np.log(score), mean_y_i, mu_out_i_scaled, w_out_i.numpy()])
         cnt += 1
 
     break
 
-result_pd = pd.DataFrame(result, columns=['time', 'time_y', 'c', 'out_y', 'score', 'sample_mean', 'mu', 'w'])
+result_pd = pd.DataFrame(result, columns=['time', 'time_y', 'c', 't', 'out_y', 'score', 'sample_mean', 'mu', 'w'])
 result_pd.to_csv('crps_result_MDNfull.csv', index=False)
-# result_pd.to_csv('crps_result_MDN_reg0.csv', index=False)
 
-fig, ax = plt.subplots(figsize=(10, 10), nrows=1, ncols=1)
+result_pd["score_exp"] = np.exp(result_pd["score"])
 
-result_pd["score_exp"] = result_pd["score"].apply(lambda x: np.exp(x))
-# sns.set_theme(style="darkgrid")
-sns.heatmap(
-    result_pd.pivot(index="time", columns="c", values="score"), cmap="BuGn"
-)
+cov_index_cmap = plt.cm.get_cmap('Set1', 10)
+
+
+fig, ax = plt.subplots(figsize=(70, 40), nrows=4, ncols=12)
+
+for sensor_id in range(12):
+    y = [x[x["c"] == sensor_id]["out_y"] for x in [result_pd[result_pd["t"] == t] for t in range(4)]]
+    mu = [x[x["c"] == sensor_id]["mu"] for x in [result_pd[result_pd["t"] == t] for t in range(4)]]
+    w = [x[x["c"] == sensor_id]["w"] for x in [result_pd[result_pd["t"] == t] for t in range(4)]]
+    score = [x[x["c"] == sensor_id]["score_exp"] for x in [result_pd[result_pd["t"] == t] for t in range(4)]]
+
+    w = np.stack([np.concatenate(x.tolist()) for x in w])
+    w_exp = np.exp(w)
+    score = np.stack([x.tolist() for x in score])
+
+
+    for t in range(4):
+        ax[t, sensor_id].plot(y[t].reset_index()["out_y"], label="out_y")
+        ax[t, sensor_id].plot(mu[t].reset_index()["mu"], label="mu")
+        ax[t, sensor_id].legend()
+        ax[t, sensor_id].set_title(f"sensor = {sensor_id} , t = {t}")
+        ax[t, sensor_id].set_xlabel("time")
+        ax[t, sensor_id].set_ylabel("value")
+plt.show()
+        # for c in range(args.n_components):
+        #     ax[t, 1].plot(w_exp[t, :, c], label=f"w_{c}")
+        # ax[t, 1].legend()
+        # # set the same color for each component
+        # ax[t, 1].set_prop_cycle(color=[cov_index_cmap(c) for c in range(args.n_components)])
+
+        # ax[t, 2].plot(score[t, :], label=f"w_{t}")
+
+
+
+# plot covariance matrix
+# 10 covariance matrices at each subplot
+
+fig2, axs2 = plt.subplots(figsize=(50, 20), nrows=2, ncols=5)
+
+for i in range(10):
+    cov_i = (engine.covariance.L[i] @ engine.covariance.L[i].T).cpu().detach().numpy()
+    axs2[i // 5, i % 5].imshow(cov_i)
+    axs2[i // 5, i % 5].set_title(f"{i}")
+    # increase title size
+    axs2[i // 5, i % 5].title.set_fontsize(40)
+    # set title color
+    axs2[i // 5, i % 5].title.set_color(cov_index_cmap(i))
+fig2
+
+
+fig3, axs3 = plt.subplots(figsize=(20, 50), nrows=5, ncols=2)
+
+for i in range(5):
+    cov_i = (engine.covariance.L[i] @ engine.covariance.L[i].T).cpu().detach().numpy()
+    corr_i = np.corrcoef(cov_i)
+    axs3[i,0].imshow(corr_i)
+    axs3[i,0].set_title(f"corr_{i}")
+    axs3[i,0].title.set_fontsize(40)
+    axs3[i,0].title.set_color(cov_index_cmap(i))
+    axs3[i,1].imshow(cov_i)
+    axs3[i,1].set_title(f"cov_{i}")
+    axs3[i,1].title.set_fontsize(40)
+    axs3[i,1].title.set_color(cov_index_cmap(i))
 plt.show()
 
 
-fig, ax = plt.subplots(figsize=(20, 10), nrows=1, ncols=2)
-plt.plot(result_pd["time_y"], result_pd["out_y"], ".", label="true")
+sensor_id = 1
+w = [x[x["c"] == sensor_id]["w"] for x in [result_pd[result_pd["t"] == t] for t in range(4)]]
+w = np.stack([np.concatenate(x.tolist()) for x in w])
+w_exp = np.exp(w)
+
+fig, ax = plt.subplots(figsize = (30,20) , nrows = 1 , ncols = 1)
+for c in range(args.n_components):
+    ax.plot(w_exp[t, :, c], label=f"w_{c}")
+ax.legend()
+# increase legend size
+plt.legend(fontsize=30)
 plt.show()
 
 
-sns.heatmap(
-    result_pd.pivot(index="time", columns="c", values="score_exp"), cmap="BuGn"
-)
-plt.show()
+fig3, axs3 = plt.subplots(figsize=(50, 20), nrows= 2, ncols=5)
 
-
-np.exp(result_pd["score"].to_numpy()).mean()
-
-
-fig, ax = plt.subplots(figsize=(30, 10), nrows=1, ncols=3)
-
-plt.cla()
-sensor_id = 2
-
-mus = np.stack(result_pd[result_pd["c"] == sensor_id]["mu"].tolist())
-ws = np.stack(result_pd[result_pd["c"] == sensor_id]["w"].tolist())
-ax[0].plot((result_pd[result_pd["c"] == sensor_id]["out_y"]).reset_index()["out_y"])
-ax[0].plot((result_pd[result_pd["c"] == sensor_id]["sample_mean"]).reset_index()["sample_mean"], color="red")
-for i in range(mus.shape[1]):
-    ax[1].plot(mus[:, i], label=str(i))
-# for i in range(mus.shape[1]):
-#     ax[2].plot(ws[:, 0, i], label=str(i))
-ax[2].plot(result_pd[result_pd["c"] == sensor_id]['score_exp'])
-ax[0].set_title("out_y")
-ax[1].set_title("mu")
-ax[2].set_title("w")
-fig
-
-
-# result_pd_ind = pd.read_csv("crps_result_MDNind.csv")
-result_pd_diag = pd.read_csv("crps_result_MDNdiag.csv")
-result_pd_fullcov = pd.read_csv("crps_result_MDNfull.csv")
-result_pd_diag["score_exp"] = result_pd_diag["score"].apply(lambda x: np.exp(x))
-result_pd_fullcov["score_exp"] = result_pd_fullcov["score"].apply(lambda x: np.exp(x))
-
-
-fig, ax = plt.subplots(figsize=(10, 10), nrows=1, ncols=1)
-plt.scatter(result_pd_diag["score"], result_pd_fullcov["score"], alpha=0.1)
-# draw x=y line
-plt.plot([0, 5], [0, 5], 'k--')
-plt.xlabel("MDN ind cov")
-plt.ylabel("MDN full cov")
-plt.xlim([-1, 5])
-plt.ylim([-1, 5])
-plt.show()
-
-# result_pd_diag['score'] = np.exp(result_pd_diag['score'])
-# result_pd_fullcov['score'] = np.exp(result_pd_fullcov['score'])
-
-result_pd_diag['score_exp'].mean()
-result_pd_fullcov['score_exp'].mean()
-
-# sns.set_theme(style="darkgrid")
-sns.heatmap(
-    result_pd_diag.pivot(index="time", columns="c", values="score"), cmap="BuGn"
-)
-plt.show()
-
-# sns.set_theme(style="darkgrid")
-sns.heatmap(
-    result_pd_fullcov.pivot(index="time", columns="c", values="score"), cmap="BuGn"
-)
-plt.show()
-
-sns.heatmap(
-    result_pd_diag.pivot(index="time", columns="c", values="score_exp"), cmap="BuGn"
-)
-plt.show()
-
-# sns.set_theme(style="darkgrid")
-sns.heatmap(
-    result_pd_fullcov.pivot(index="time", columns="c", values="score_exp"), cmap="BuGn"
-)
+for i in range(10):
+    cov_i = (engine.covariance.L[i] @ engine.covariance.L[i].T).cpu().detach().numpy()
+    corr_i = np.corrcoef(cov_i)
+    axs3[i // 5, i % 5].imshow(corr_i)
+    axs3[i // 5, i % 5].set_title(f"component_{i}")
+    # increase title size
+    axs3[i // 5, i % 5].title.set_fontsize(40)
 plt.show()

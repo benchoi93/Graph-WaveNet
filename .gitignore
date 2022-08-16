@@ -163,3 +163,7 @@ garage/
 .vscode/
 logs/
 data
+logs*/
+*.csv
+*.log
+*.out

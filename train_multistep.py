@@ -41,6 +41,7 @@ parser.add_argument("--pred-len", type=int, default=12)
 parser.add_argument("--rho", type=float, default=0.1)
 parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=0.1)
+parser.add_argument("--flow", action="store_true")
 
 args = parser.parse_args()
 
@@ -73,7 +74,8 @@ def main():
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
-    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
+    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
+                                   target_sensor_inds=target_sensor_inds, flow=args.flow)
     scaler = dataloader['scaler']
     supports = [torch.tensor(i).to(device) for i in adj_mx]
 
@@ -180,8 +182,9 @@ def main():
             valid_mse_loss.append(metrics['mse_loss'])
             valid_crps_loss.append(metrics["crps"])
 
-            if iter == 0:
-                engine.plot_cov(metrics)
+            if i % 10 == 0:
+                if iter == 0:
+                    engine.plot_cov(metrics)
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -228,8 +231,8 @@ def main():
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            if best_val_loss > mvalid_loss:
-                best_val_loss = mvalid_loss
+            if best_val_loss > mvalid_crps_loss:
+                best_val_loss = mvalid_crps_loss
                 engine.save(best=True)
                 print("Saved best model")
 

@@ -151,14 +151,20 @@ def load_adj(pkl_filename, adjtype):
     return sensor_ids, sensor_id_to_ind, adj
 
 
-def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None, target_sensor_inds=None):
+def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None, target_sensor_inds=None, flow=True):
     data = {}
     for category in ['train', 'val', 'test']:
         cat_data = np.load(os.path.join(dataset_dir, category + '.npz'))
         if target_sensor_inds is not None:
             if dataset_dir == "data/PEMS-BAY-2022":
-                data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :][:, :, :, (1, 2)]
-                data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :][:, :, :, (1, 2)]
+                if flow:
+                    data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :][:, :, :, (0, 2)]
+                    data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :][:, :, :, (0, 2)]
+                else:
+                    # speed
+                    data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :][:, :, :, (1, 2)]
+                    data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :][:, :, :, (1, 2)]
+
             else:
                 data['x_' + category] = cat_data['x'][:, :, target_sensor_inds, :]
                 data['y_' + category] = cat_data['y'][:, :, target_sensor_inds, :]
