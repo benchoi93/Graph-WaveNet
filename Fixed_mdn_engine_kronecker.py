@@ -22,26 +22,39 @@ class FixedLowRankMDN(nn.Module):
 
 
 class FixedMDN(nn.Module):
-    def __init__(self, n_components, n_vars, rho=0.5, diag=False, trainL=True):
+    def __init__(self, n_components, n_vars,num_pred, rho=0.5, diag=False, trainL=True):
         super(FixedMDN, self).__init__()
-        self.dim_L = (n_components, n_vars, n_vars)
+        self.dim_L_1 = (n_components, n_vars, n_vars)
+        self.dim_L_2 = (n_components, num_pred, num_pred)
 
-        init_L = torch.diag_embed(torch.ones(*self.dim_L[:2])) * 0.01 
+        init_L1 = torch.diag_embed(torch.ones(*self.dim_L_1[:2])) * 0.01 
+        init_L2 = torch.diag_embed(torch.ones(*self.dim_L_2[:2])) * 0.01
         
-        self._L = nn.Parameter(init_L.detach(), requires_grad=trainL)
+        self._L1 = nn.Parameter(init_L1.detach(), requires_grad=trainL)
+        self._L2 = nn.Parameter(init_L2.detach(), requires_grad=trainL)
         # self.rho = nn.Parameter(torch.ones(1)*rho)
         self.diag = diag
         self.rho = rho
 
     @property
-    def L(self):
+    def L1(self):
         # Ltemp = torch.tanh(self._L) * self.rho
-        Ltemp = self._L
+        Ltemp = self._L1
 
         if self.diag:
             return torch.diag_embed(torch.diagonal(Ltemp, dim1=1, dim2=2))
         else:
             return torch.tril(Ltemp)
+
+    @property
+    def L2(self):
+        Ltemp = self._L2
+
+        if self.diag:
+            return torch.diag_embed(torch.diagonal(Ltemp, dim1=1, dim2=2))
+        else:
+            return torch.tril(Ltemp)
+
 
 
 class LowRankMDNhead(nn.Module):
@@ -248,7 +261,7 @@ class MDN_trainer():
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
-        self.covariance = FixedMDN(n_components, num_nodes * self.num_pred, rho=rho, diag=diag, trainL = rho!=0)
+        self.covariance = FixedMDN(n_components, num_nodes , self.num_pred, rho=rho, diag=diag, trainL = rho!=0)
 
         self.fc_w = nn.Sequential(
             nn.Linear(self.n_components*num_nodes*self.out_per_comp, nhid),
@@ -273,7 +286,7 @@ class MDN_trainer():
 
         import datetime
         # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
-        self.logdir = f'./logs/GWNMDN_multistep_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{pred_len}_rho{rho}_diag{diag}_msecoef{mse_coef}'
+        self.logdir = f'./logs/GWNMDN_kronecker_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{pred_len}_rho{rho}_diag{diag}_msecoef{mse_coef}'
 
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
@@ -304,7 +317,10 @@ class MDN_trainer():
 
         # output = output.view(-1, self.num_nodes, self.n_components, self.out_per_comp)
 
-        L = torch.tril(self.covariance.L.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
+        L_spatial = torch.tril(self.covariance.L1.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
+        L_temporal = torch.tril(self.covariance.L2.unsqueeze(0).expand(output.shape[0], -1, -1, -1))
+
+
         mus = output[:, 0, :, :self.num_pred]
         mus = mus.reshape(-1, self.num_pred * self.num_nodes)
 
