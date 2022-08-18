@@ -70,9 +70,10 @@ def main():
                       '400185'
                       ]
 
-    # target_sensors = sensor_ids
+    target_sensors = sensor_ids
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
+    args.num_nodes = len(target_sensors)
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
                                    target_sensor_inds=target_sensor_inds, flow=args.flow)

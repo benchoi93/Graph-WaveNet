@@ -234,3 +234,16 @@ def metric(pred, real):
     mape = masked_mape(pred, real, 0.0).item()
     rmse = masked_rmse(pred, real, 0.0).item()
     return mae, mape, rmse
+
+def kron(a, b):
+    """
+    Kronecker product of matrices a and b with leading batch dimensions.
+    Batch dimensions are broadcast. The number of them mush
+    :type a: torch.Tensor
+    :type b: torch.Tensor
+    :rtype: torch.Tensor
+    """
+    siz1 = torch.Size(torch.tensor(a.shape[-2:]) * torch.tensor(b.shape[-2:]))
+    res = a.unsqueeze(-1).unsqueeze(-3) * b.unsqueeze(-2).unsqueeze(-4)
+    siz0 = res.shape[:-4]
+    return res.reshape(siz0 + siz1)

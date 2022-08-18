@@ -70,7 +70,9 @@ def main():
                       '400185'
                       ]
 
-    # target_sensors = sensor_ids
+    target_sensors = sensor_ids
+
+    args.num_nodes = len(target_sensors)
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
@@ -123,7 +125,7 @@ def main():
     train_time = []
 
     best_val_loss = float('inf')
-    for i in range(1, args.epochs+1):
+    for i in range(0, args.epochs+1):
         # if i % 10 == 0:
         #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
         # for g in engine.optimizer.param_groups:
