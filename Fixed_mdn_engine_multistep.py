@@ -26,8 +26,8 @@ class FixedMDN(nn.Module):
         super(FixedMDN, self).__init__()
         self.dim_L = (n_components, n_vars, n_vars)
 
-        init_L = torch.diag_embed(torch.ones(*self.dim_L[:2])) * 0.01 
-        
+        init_L = torch.diag_embed(torch.ones(*self.dim_L[:2])) * 0.01
+
         self._L = nn.Parameter(init_L.detach(), requires_grad=trainL)
         # self.rho = nn.Parameter(torch.ones(1)*rho)
         self.diag = diag
@@ -190,7 +190,13 @@ class CholeskyMDNhead(LowRankMDNhead):
         w, mu, scale_tril = self.get_parameters(features)
 
         # sum of w_i * scale_tril_i
-        scale_tril_new = (w.exp().unsqueeze(-1).unsqueeze(-1).expand_as(scale_tril) * scale_tril).sum(1)
+        b, c, d, _ = scale_tril.size()
+        scale_tril_new = torch.zeros((b, d, d), device=scale_tril.device)
+
+        for i in range(c):
+            scale_tril_new += w[:, i].exp().unsqueeze(-1).unsqueeze(-1) * scale_tril[:, i, :, :]
+
+        # scale_tril_new = (w.exp().unsqueeze(-1).unsqueeze(-1).expand_as(scale_tril) * scale_tril).sum(1)
 
         dist = Dist.MultivariateNormal(
             loc=mu,
@@ -248,7 +254,7 @@ class MDN_trainer():
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
-        self.covariance = FixedMDN(n_components, num_nodes * self.num_pred, rho=rho, diag=diag, trainL = rho!=0)
+        self.covariance = FixedMDN(n_components, num_nodes * self.num_pred, rho=rho, diag=diag, trainL=rho != 0)
 
         self.fc_w = nn.Sequential(
             nn.Linear(self.n_components*num_nodes*self.out_per_comp, nhid),
@@ -308,8 +314,9 @@ class MDN_trainer():
         mus = output[:, 0, :, :self.num_pred]
         mus = mus.reshape(-1, self.num_pred * self.num_nodes)
 
-        L[:, :, torch.arange(L.shape[-1]), torch.arange(L.shape[-1])] = torch.nn.functional.elu(
-            L[:, :, torch.arange(L.shape[-1]), torch.arange(L.shape[-1])]) + 1
+        if self.covariance.rho != 0:
+            L[:, :, torch.arange(L.shape[-1]), torch.arange(L.shape[-1])] = torch.nn.functional.elu(
+                L[:, :, torch.arange(L.shape[-1]), torch.arange(L.shape[-1])]) + 1
 
         output = output.reshape(-1, self.n_components*self.num_nodes * self.out_per_comp)
         w = self.fc_w(output)
@@ -404,6 +411,7 @@ class MDN_trainer():
 
         return crps
         # self.cnt += 1
+
     def plot_cov(self, features):
         # dist = self.mdn_head.get_output_distribution(features)
         # sample_cov = dist.component_distribution.covariance_matrix[0]

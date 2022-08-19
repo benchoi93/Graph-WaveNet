@@ -22,16 +22,16 @@ class FixedLowRankMDN(nn.Module):
 
 
 class FixedMDN(nn.Module):
-    def __init__(self, n_components, n_vars,num_pred, rho=0.5, diag=False, trainL=True):
+    def __init__(self, n_components, n_vars, num_pred, rho=0.5, diag=False, trainL=True):
         super(FixedMDN, self).__init__()
         self.dim_L_1 = (n_components, n_vars, n_vars)
         self.dim_L_2 = (n_components, num_pred, num_pred)
 
-        # init_L1 = torch.diag_embed(torch.rand(*self.dim_L_1[:2])) * 0.01 
-        # init_L2 = torch.diag_embed(torch.rand(*self.dim_L_2[:2])) * 0.01
-        init_L1 = torch.diag_embed(torch.ones(*self.dim_L_1[:2])) * 0.01 
-        init_L2 = torch.diag_embed(torch.ones(*self.dim_L_2[:2])) * 0.01
-        
+        init_L1 = torch.diag_embed(torch.rand(*self.dim_L_1[:2])) * 0.01
+        init_L2 = torch.diag_embed(torch.rand(*self.dim_L_2[:2])) * 0.01
+        # init_L1 = torch.diag_embed(torch.ones(*self.dim_L_1[:2])) * 0.01
+        # init_L2 = torch.diag_embed(torch.ones(*self.dim_L_2[:2])) * 0.01
+
         self._L1 = nn.Parameter(init_L1.detach(), requires_grad=trainL)
         self._L2 = nn.Parameter(init_L2.detach(), requires_grad=trainL)
         # self.rho = nn.Parameter(torch.ones(1)*rho)
@@ -56,7 +56,6 @@ class FixedMDN(nn.Module):
             return torch.diag_embed(torch.diagonal(Ltemp, dim1=1, dim2=2))
         else:
             return torch.tril(Ltemp)
-
 
 
 class LowRankMDNhead(nn.Module):
@@ -185,6 +184,7 @@ class CholeskyMDNhead(LowRankMDNhead):
         dist = self.get_output_distribution(features)
         target = y[:, :, self.pred_len].reshape(y.shape[0], -1)
         nll_loss = - dist.log_prob(target).mean()
+        nll_loss2 = self.get_nll(features, target)
 
         reg_loss = self.get_sparsity_regularization_loss(dist)
         dist = self.get_output_distribution(features, consider_neighbors=False)
@@ -202,7 +202,7 @@ class CholeskyMDNhead(LowRankMDNhead):
         # input : features
         # shape of input = (batch_size, hidden)
         # w, mu, cov = self.get_parameters(features)
-        w, mu, cov = self.get_parameters(features)
+        w, mu, cov_s, cov_t, cov = self.get_parameters(features)
 
         # sum of w_i * scale_tril_i
         # scale_tril_new = (w.exp().unsqueeze(-1).unsqueeze(-1).expand_as(scale_tril) * scale_tril).sum(1)
@@ -215,6 +215,37 @@ class CholeskyMDNhead(LowRankMDNhead):
 
         return dist
 
+    def get_nll(self, features, target):
+        w, mu, cov_s, cov_t, _ = self.get_parameters(features)
+
+        z = target - mu
+        N = self.n_vars
+        T = len(self.pred_len)
+
+        assert(N * T == z.shape[1])
+
+        nll_loss = 0
+        for i in range(N):
+            for j in range(N):
+                y_front = z[:, i*T:(i+1)*T]
+                y_back = z[:, j*T:(j+1)*T]
+
+                # for k in range(cov_t.shape[0]):
+                K_s = cov_s[:, i, j].unsqueeze(-1).unsqueeze(-1)
+                K_t = cov_t
+                K = K_s * K_t
+
+                K_final = w.unsqueeze(-1).unsqueeze(-1) * K.unsqueeze(0).expand(z.shape[0], -1, -1, -1)
+                K_final = K_final.sum(1)
+
+                nll_loss += - 0.5 * torch.einsum("bij,bjk,bkl->bil", y_front.unsqueeze(1), K_final, y_back.unsqueeze(-1)).squeeze(-1).squeeze(-1)
+
+        # determinants
+        for k in range(cov_t.shape[0]):
+            nll_loss += w[:, k].log() + N * cov_t[k].logdet() + T * cov_s[k].logdet()
+
+        return nll_loss
+
     def get_parameters(self, features):
         # input : features : dict of tensors, keys: w, mu, D, V
         # check if 'w' , 'mu' , 'L' are in features.keys()
@@ -223,7 +254,7 @@ class CholeskyMDNhead(LowRankMDNhead):
         assert('mu' in features.keys())
         # assert('cov' in features.keys())
         # return features['w'], features['mu'], features['cov']
-        return features['w'], features['mu'], features['cov']
+        return features['w'], features['mu'], features['cov_spatial'], features['cov_temporal'], features['cov']
 
 
 class MDN_trainer():
@@ -264,7 +295,7 @@ class MDN_trainer():
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
-        self.covariance = FixedMDN(n_components, num_nodes , self.num_pred, rho=rho, diag=diag, trainL = rho!=0)
+        self.covariance = FixedMDN(n_components, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0)
 
         self.fc_w = nn.Sequential(
             nn.Linear(self.n_components*num_nodes*self.out_per_comp, nhid),
@@ -329,26 +360,39 @@ class MDN_trainer():
 
         L_spatial = self.covariance.L1.unsqueeze(0).expand(self.n_components, -1, -1, -1)
         L_temporal = self.covariance.L2.unsqueeze(0).expand(self.n_components, -1, -1, -1)
-        L_spatial = L_spatial.reshape(self.n_components * self.n_components , self.num_nodes , self.num_nodes)
-        L_temporal = L_temporal.transpose(0,1)
-        L_temporal = L_temporal.reshape(self.n_components * self.n_components , self.num_pred , self.num_pred)
+        L_spatial = L_spatial.reshape(self.n_components * self.n_components, self.num_nodes, self.num_nodes)
+        L_temporal = L_temporal.transpose(0, 1)
+        L_temporal = L_temporal.reshape(self.n_components * self.n_components, self.num_pred, self.num_pred)
 
         L_spatial[:,  torch.arange(L_spatial.shape[-1]), torch.arange(L_spatial.shape[-1])] = torch.nn.functional.elu(
             L_spatial[:,  torch.arange(L_spatial.shape[-1]), torch.arange(L_spatial.shape[-1])]) + 1
         L_temporal[:,  torch.arange(L_temporal.shape[-1]), torch.arange(L_temporal.shape[-1])] = torch.nn.functional.elu(
             L_temporal[:,  torch.arange(L_temporal.shape[-1]), torch.arange(L_temporal.shape[-1])]) + 1
-            
+
         # cov = torch.zeros(output.shape[0] , self.n_components * self.n_components , self.num_pred * self.num_nodes , self.num_pred * self.num_nodes)
-        cov_spatial = torch.einsum("ijk,ikl->ijl",L_spatial , L_spatial.transpose(-1,-2))
-        cov_temporal = torch.einsum("ijk,ikl->ijl" , L_temporal, L_temporal.transpose(-1,-2))
-        
-        cov = util.kron(cov_spatial , cov_temporal)
-        cov = cov.unsqueeze(0).expand(output.shape[0] , -1 , -1 , -1 )
-        cov = (w.unsqueeze(-1).unsqueeze(-1).expand_as(cov) * cov).sum(1)
-        
+        cov_spatial = torch.einsum("ijk,ikl->ijl", L_spatial, L_spatial.transpose(-1, -2))
+        cov_temporal = torch.einsum("ijk,ikl->ijl", L_temporal, L_temporal.transpose(-1, -2))
+
+        cov = util.kron(cov_spatial, cov_temporal)
+        cov = cov.unsqueeze(0).expand(output.shape[0], -1, -1, -1)
+        # cov = (w.unsqueeze(-1).unsqueeze(-1).expand_as(cov) * cov).sum(1)
+
+        b, c, d, _ = cov.size()
+        cov_new = torch.zeros((b, d, d), device=cov.device)
+
+        for i in range(c):
+            cov_new += w[:, i].unsqueeze(-1).unsqueeze(-1) * cov[:, i, :, :]
+
         scaled_real_val = self.scaler.transform(real_val)
         loss, nll_loss, reg_loss, mse_loss = self.mdn_head.forward(
-            features={'w': w, 'mu': mus, 'cov': cov, "rho": self.covariance.rho, 'target': scaled_real_val})
+            features={'w': w,
+                      'mu': mus,
+                      'cov_spatial': cov_spatial,
+                      "cov_temporal": cov_temporal,
+                      "cov": cov_new,
+                      "rho": self.covariance.rho,
+                      'target': scaled_real_val}
+        )
 
         if not eval:
             loss.backward()
@@ -435,6 +479,7 @@ class MDN_trainer():
 
         return crps
         # self.cnt += 1
+
     def plot_cov(self, features):
         # dist = self.mdn_head.get_output_distribution(features)
         # sample_cov = dist.component_distribution.covariance_matrix[0]
