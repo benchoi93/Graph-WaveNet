@@ -27,9 +27,9 @@ parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
-parser.add_argument('--epochs', type=int, default=1000, help='')
+parser.add_argument('--epochs', type=int, default=300, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
-#parser.add_argument('--seed',type=int,default=99,help='random seed')
+parser.add_argument('--seed', type=int, default=99, help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
 parser.add_argument('--n_components', type=int, default=10, help='experiment id')
@@ -38,7 +38,7 @@ parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
 parser.add_argument("--outlier_distribution", action="store_true", help="outlier_distribution")
 parser.add_argument("--pred-len", type=int, default=12)
-parser.add_argument("--rho", type=float, default=0.1)
+parser.add_argument("--rho", type=float, default=0.01)
 parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=0.1)
 parser.add_argument("--flow", action="store_true")
@@ -50,8 +50,8 @@ args.pred_len = [2, 5, 8, 11]
 
 def main():
     # set seed
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     # load data
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
@@ -70,7 +70,7 @@ def main():
                       '400185'
                       ]
 
-    target_sensors = sensor_ids
+    # target_sensors = sensor_ids
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
     args.num_nodes = len(target_sensors)
@@ -124,7 +124,7 @@ def main():
     train_time = []
 
     best_val_loss = float('inf')
-    for i in range(1, args.epochs+1):
+    for i in range(args.epochs):
         # if i % 10 == 0:
         #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
         # for g in engine.optimizer.param_groups:
@@ -165,6 +165,7 @@ def main():
         valid_reg_loss = []
         valid_mse_loss = []
         valid_crps_loss = []
+        valid_es_loss = []
 
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
@@ -182,10 +183,38 @@ def main():
             valid_reg_loss.append(metrics['reg_loss'])
             valid_mse_loss.append(metrics['mse_loss'])
             valid_crps_loss.append(metrics["crps"])
+            valid_es_loss.append(metrics["ES"])
 
-            if i % 10 == 0:
-                if iter == 0:
-                    engine.plot_cov(metrics)
+            # if i % 10 == 0:
+            #     if iter == 0:
+            #         engine.plot_cov(metrics)
+
+        test_loss = []
+        test_mape = []
+        test_rmse = []
+        test_nll_loss = []
+        test_reg_loss = []
+        test_mse_loss = []
+        test_crps_loss = []
+        test_es_loss = []
+
+        s1 = time.time()
+        for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
+            testx = torch.Tensor(x).to(device)
+            testx = testx.transpose(1, 3)
+            testy = torch.Tensor(y).to(device)
+            testy = testy.transpose(1, 3)
+
+            metrics = engine.eval(testx, testy[:, 0, :, :])
+
+            test_loss.append(metrics['loss'])
+            test_mape.append(metrics['mape'])
+            test_rmse.append(metrics['rmse'])
+            test_nll_loss.append(metrics['nll_loss'])
+            test_reg_loss.append(metrics['reg_loss'])
+            test_mse_loss.append(metrics['mse_loss'])
+            test_crps_loss.append(metrics["crps"])
+            test_es_loss.append(metrics["ES"])
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -202,11 +231,23 @@ def main():
         mvalid_rmse = np.mean(valid_rmse)
         mvalid_nll_loss = np.mean(valid_nll_loss)
         mvalid_reg_loss = np.mean(valid_reg_loss)
-
-        # mtrain_crps_loss = np.mean(train_crps_loss)
         mvalid_crps_loss = np.mean(valid_crps_loss)
+        mvalid_es_loss = np.mean(valid_es_loss)
 
         his_loss.append(mvalid_loss)
+
+        mtest_loss = np.mean(test_loss)
+        mtest_mape = np.mean(test_mape)
+        mtest_rmse = np.mean(test_rmse)
+        mtest_nll_loss = np.mean(test_nll_loss)
+        mtest_reg_loss = np.mean(test_reg_loss)
+        mtest_crps_loss = np.mean(test_crps_loss)
+        mtest_es_loss = np.mean(test_es_loss)
+
+        his_loss.append(mvalid_loss)
+
+        engine.summary.add_scalar('time/train_time', train_time[-1], i)
+        engine.summary.add_scalar('time/val_time', val_time[-1], i)
 
         engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
         engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
@@ -217,13 +258,22 @@ def main():
         engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
         engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
         engine.summary.add_scalar('errors/val_crps', mvalid_crps_loss, i)
+        engine.summary.add_scalar('errors/val_es', mvalid_es_loss, i)
+
+        engine.summary.add_scalar('errors/test_mape', mtest_mape, i)
+        engine.summary.add_scalar('errors/test_rmse', mtest_rmse, i)
+        engine.summary.add_scalar('errors/test_crps', mtest_crps_loss, i)
+        engine.summary.add_scalar('errors/test_es', mtest_es_loss, i)
 
         engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
         engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
         engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
         engine.summary.add_scalar('loss/val_reg_loss', mvalid_reg_loss, i)
+        engine.summary.add_scalar('loss/test_nll_loss', mtest_nll_loss, i)
+        engine.summary.add_scalar('loss/test_reg_loss', mtest_reg_loss, i)
         engine.summary.add_scalar('loss/train_mse_loss', np.mean(train_mse_loss), i)
         engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
+        engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
 
         # engine.summary.add_scalar('loss/rho', torch.sigmoid(engine.covariance.rho).item(), i)
 
@@ -232,10 +282,10 @@ def main():
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            if best_val_loss > mvalid_crps_loss:
-                best_val_loss = mvalid_crps_loss
+            if best_val_loss > mvalid_es_loss:
+                best_val_loss = mvalid_es_loss
                 engine.save(best=True)
-                print("Saved best model")
+                print(f"Saved best model at epoch {i} with loss {best_val_loss}")
 
             else:
                 engine.save()
@@ -244,44 +294,51 @@ def main():
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
-    # testing
-    bestid = np.argmin(his_loss)
-    engine.model.load_state_dict(torch.load(args.save+"_epoch_"+str(bestid+1)+"_"+str(round(his_loss[bestid], 2))+".pth"))
+    engine.load(model_path=f'{engine.logdir}/best_model.pt',
+                cov_path=f'{engine.logdir}/best_covariance.pt',
+                fc_w_path=f'{engine.logdir}/best_fc_w.pt')
 
-    outputs = []
-    realy = torch.Tensor(dataloader['y_test']).to(device)
-    realy = realy.transpose(1, 3)[:, 0, :, :]
+    test_loss = []
+    test_mape = []
+    test_rmse = []
+    test_nll_loss = []
+    test_reg_loss = []
+    test_mse_loss = []
+    test_crps_loss = []
 
+    s1 = time.time()
     for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
         testx = torch.Tensor(x).to(device)
         testx = testx.transpose(1, 3)
-        with torch.no_grad():
-            preds = engine.model(testx).transpose(1, 3)
-        outputs.append(preds.squeeze())
+        testy = torch.Tensor(y).to(device)
+        testy = testy.transpose(1, 3)
 
-    yhat = torch.cat(outputs, dim=0)
-    yhat = yhat[:realy.size(0), ...]
+        metrics = engine.eval(testx, testy[:, 0, :, :])
 
-    print("Training finished")
-    print("The valid loss on best model is", str(round(his_loss[bestid], 4)))
+        test_loss.append(metrics['loss'])
+        test_mape.append(metrics['mape'])
+        test_rmse.append(metrics['rmse'])
+        test_nll_loss.append(metrics['nll_loss'])
+        test_reg_loss.append(metrics['reg_loss'])
+        test_mse_loss.append(metrics['mse_loss'])
+        test_crps_loss.append(metrics["crps"])
 
-    amae = []
-    amape = []
-    armse = []
-    for i in range(12):
-        pred = scaler.inverse_transform(yhat[:, :, i])
-        real = realy[:, :, i]
-        metrics = util.metric(pred, real)
-        log = 'Evaluate best model on test data for horizon {:d}, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'
-        print(log.format(i+1, metrics[0], metrics[1], metrics[2]))
-        amae.append(metrics[0])
-        amape.append(metrics[1])
-        armse.append(metrics[2])
+    mtest_loss = np.mean(test_loss)
+    mtest_mape = np.mean(test_mape)
+    mtest_rmse = np.mean(test_rmse)
+    mtest_nll_loss = np.mean(test_nll_loss)
+    mtest_reg_loss = np.mean(test_reg_loss)
+    mtest_mse_loss = np.mean(test_mse_loss)
+    mtest_crps_loss = np.mean(test_crps_loss)
 
-    log = 'On average over 12 horizons, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'
-    print(log.format(np.mean(amae), np.mean(amape), np.mean(armse)))
-    # torch.save(engine.model.state_dict(), args.save+"_exp"+str(args.expid)+"_best_"+str(round(his_loss[bestid], 2))+".pth")
-    engine.save()
+    print("Testing Results:")
+    print("Test Loss: {:.4f}".format(mtest_loss))
+    print("Test MAPE: {:.4f}".format(mtest_mape))
+    print("Test RMSE: {:.4f}".format(mtest_rmse))
+    print("Test NLL Loss: {:.4f}".format(mtest_nll_loss))
+    print("Test Reg Loss: {:.4f}".format(mtest_reg_loss))
+    print("Test MSE Loss: {:.4f}".format(mtest_mse_loss))
+    print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
 
 
 if __name__ == "__main__":

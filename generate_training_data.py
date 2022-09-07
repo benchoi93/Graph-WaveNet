@@ -136,7 +136,7 @@ def generate_train_val_test(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_dir", type=str, default="data/PEMS-BAY-2022", help="Output directory.")
-    parser.add_argument("--traffic_df_filename", type=str, default="data/PEMSBAY_2022.npy", help="Raw traffic readings.",)
+    parser.add_argument("--traffic_df_filename", type=str, default="data/PEMSBAY_2022 (1).npy", help="Raw traffic readings.",)
     parser.add_argument("--seq_length_x", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--seq_length_y", type=int, default=37, help="Sequence Length.",)
     parser.add_argument("--y_start", type=int, default=1, help="Y pred start", )

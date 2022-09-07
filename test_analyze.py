@@ -1,11 +1,13 @@
 import ast
 import pandas as pd
 
+
 def list_eval(str_in):
     return [float(x) for x in str_in[1:-1].split(" ") if x != ""]
 
-name = "val"
-df = pd.read_csv(f"/app/out_with_nll_{name}.csv")
+
+name = "out_kronecker_0904"
+df = pd.read_csv(f"/app/{name}.csv")
 
 result = []
 for i in range(df.shape[0]):
@@ -25,6 +27,7 @@ for i in range(df.shape[0]):
     mape = list_eval(df.iloc[i][3])
     mae = list_eval(df.iloc[i][4])
     crps = list_eval(df.iloc[i][5])
+    ES = list_eval(df.iloc[i][6])
 
     for t in range(4):
         result.append(
@@ -40,13 +43,14 @@ for i in range(df.shape[0]):
                 "rmse": rmse[t],
                 "mape": mape[t],
                 "mae": mae[t],
-                "crps": crps[t]
+                "crps": crps[t],
+                "ES": ES[t]
             }
         )
-        
+
 
 result_pd = pd.DataFrame(result)
-result_pd.to_csv(f"/app/out_{name}.csv")
+result_pd.to_csv(f"/app/{name}_analyzed.csv")
 
 
 # df_train = pd.read_csv(f"/app/out_train.csv")
