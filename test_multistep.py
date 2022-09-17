@@ -44,7 +44,7 @@ parser.add_argument('--print_every', type=int, default=50, help='')
 #parser.add_argument('--seed',type=int,default=99,help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=10, help='experiment id')
+parser.add_argument('--n_components', type=int, default=1, help='experiment id')
 parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
 parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
@@ -95,7 +95,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
     #                  adjinit)
 
-    engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, num_rank, nhid, args.dropout,
+    engine = MDN_trainer(scaler, args.in_dim, args.seq_length, num_nodes, num_rank, nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=n_components, reg_coef=reg_coef, consider_neighbors=args.consider_neighbors,
                          outlier_distribution=args.outlier_distribution, pred_len=pred_len, rho=rho, diag=diag,
@@ -105,8 +105,9 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
         engine.load(model_path=model_path + '/best_model.pt',
                     cov_path=model_path + '/best_covariance.pt',
                     fc_w_path=model_path + '/best_fc_w.pt')
-    except:
+    except Exception as e:
         print("model not found")
+        print(e)
         return False, 0, 0, 0, 0, 0
 
     results = []
@@ -184,18 +185,24 @@ if __name__ == "__main__":
                       '400185'
                       ]
 
+    target_sensors = sensor_ids
+
     num_nodes = len(target_sensors)
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
-    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds, flow=False)
+    flow = False
+    logpath = "logspemsbay2022speed325"
+    savepath = f"out_{logpath}.csv"
+
+    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
+                                   target_sensor_inds=target_sensor_inds, flow=flow)
 
     # file_list = [x for x in os.listdir("logs")]
-    file_list = [x for x in os.listdir("logs") if "multistep" in x]
+    file_list = [x for x in os.listdir(f"{logpath}") if "multistep" in x]
     # file_list = [x for x in os.listdir("logs") if "GWN_MDNdiag_20220623" in x]
     # file_list = ["GWN_MDNdiag_20220624-132309_N1_R5_reg0.01_nhid4_pred36", "GWN_MDNdiag_20220624-132314_N1_R5_reg0.001_nhid4_pred36"]
     print(file_list)
-    savepath = "out_multistep_0905.csv"
     try:
         result = pd.read_csv(savepath)
     except:
@@ -210,7 +217,7 @@ if __name__ == "__main__":
             continue
 
         done, result_rmse, result_mape, result_mae, result_crps, result_ES = main(
-            f"logs/{file}", dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes)
+            f"{logpath}/{file}", dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes)
 
         if done:
             result = pd.concat([result, pd.DataFrame([[file, result_rmse, result_mape, result_mae, result_crps, result_ES]])], axis=0)

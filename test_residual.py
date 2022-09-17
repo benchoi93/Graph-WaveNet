@@ -94,7 +94,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
     #                  adjinit)
 
-    engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, num_rank, nhid, args.dropout,
+    engine = MDN_trainer(scaler, args.in_dim, args.seq_length, num_nodes, num_rank, nhid, args.dropout,
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=n_components, reg_coef=reg_coef, pred_len=pred_len, rho=rho, diag=args.diag,
                          mse_coef=args.mse_coef)
@@ -180,16 +180,18 @@ if __name__ == "__main__":
                       '400507',
                       '400185'
                       ]
+    target_sensors = sensor_ids
 
     num_nodes = len(target_sensors)
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
-    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
-                                   target_sensor_inds=target_sensor_inds, flow=args.flow)
+    flow = False
+    logpath = "logspemsbay2022speed325"
+    savepath = f"out_{logpath}.csv"
 
-    logpath = "logs"
-    savepath = "out_residual_0904.csv"
+    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
+                                   target_sensor_inds=target_sensor_inds, flow=flow)
 
     file_list = [x for x in os.listdir(logpath) if "residual" in x]
     # file_list = [x for x in os.listdir("logs") if "0808" in x]

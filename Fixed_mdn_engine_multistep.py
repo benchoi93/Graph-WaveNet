@@ -416,12 +416,12 @@ class MDN_trainer():
         with torch.no_grad():
             info = self.train(input, real_val, eval=True)
 
-        crps, ES = self.specific_eval(features=info)
-        info['crps'] = crps
-        info["ES"] = ES.cpu().numpy()
+        # crps, ES = self.specific_eval(features=info)
+        # info['crps'] = crps
+        # info["ES"] = ES.cpu().numpy()
 
-        # info['crps'] = 0
-        # info["ES"] = 0
+        info['crps'] = 0
+        info["ES"] = 0
 
         return info
 

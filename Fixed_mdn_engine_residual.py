@@ -223,7 +223,7 @@ class MDN_trainer():
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
         self.res_head = CholeskyResHead(n_components, num_nodes, num_rank, reg_coef=reg_coef, pred_len=pred_len,
                                         consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution,
-                                        mse_coef=mse_coef)
+                                        mse_coef=mse_coef, rho=rho)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -328,9 +328,11 @@ class MDN_trainer():
         L_spatial, L_temporal = self.get_L()
 
         scaled_real_val = self.scaler.transform(real_val)
-        mask = real_val[:, :, self.pred_len] == 0
 
-        mus = mus * ~(mask).reshape(mus.shape) + scaled_real_val[:, :, self.pred_len].reshape(mus.shape) * mask.reshape(mus.shape)
+        if not eval:
+            # avoid learning high variance/covariance from missing values
+            mask = real_val[:, :, self.pred_len] == 0
+            mus = mus * ~(mask).reshape(mus.shape) + scaled_real_val[:, :, self.pred_len].reshape(mus.shape) * mask.reshape(mus.shape)
 
         features = {
             'mu': mus,
@@ -389,11 +391,12 @@ class MDN_trainer():
         with torch.no_grad():
             info = self.train(input, real_val, eval=True)
 
-        crps, ES = self.specific_eval(features=info)
-        # crps = 0
+        # crps, ES = self.specific_eval(features=info)
+        # info['crps'] = crps
+        # info["ES"] = ES.cpu().numpy()
 
-        info['crps'] = crps
-        info["ES"] = ES.cpu().numpy()
+        info['crps'] = 0
+        info["ES"] = 0
 
         return info
 

@@ -11,7 +11,7 @@ from Fixed_mdn_engine_multistep import MDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
-parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
@@ -45,7 +45,8 @@ parser.add_argument("--flow", action="store_true")
 
 args = parser.parse_args()
 
-args.pred_len = [2, 5, 8, 11]
+# args.pred_len = [2, 5, 8, 11]
+args.pred_len = list(range(12))
 
 
 def main():
@@ -70,7 +71,7 @@ def main():
                       '400185'
                       ]
 
-    # target_sensors = sensor_ids
+    target_sensors = sensor_ids
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
     args.num_nodes = len(target_sensors)
@@ -282,8 +283,8 @@ def main():
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            if best_val_loss > mvalid_es_loss:
-                best_val_loss = mvalid_es_loss
+            if best_val_loss > mvalid_mape:
+                best_val_loss = mvalid_mape
                 engine.save(best=True)
                 print(f"Saved best model at epoch {i} with loss {best_val_loss}")
 
