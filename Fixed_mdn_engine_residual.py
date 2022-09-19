@@ -117,14 +117,21 @@ class CholeskyResHead(nn.Module):
 
         U_inv = torch.einsum("rij, rjk ->rik", L_s, L_s.transpose(-1, -2))
         V_inv = torch.einsum("rij, rjk ->rik", L_t, L_t.transpose(-1, -2))
+        # U_inv = U_inv.unsqueeze(0).repeat(b, 1, 1, 1)
+        # V_inv = V_inv.unsqueeze(0).repeat(b, 1, 1, 1)
 
-        U_inv = U_inv.unsqueeze(0).repeat(b, 1, 1, 1)
-        V_inv = V_inv.unsqueeze(0).repeat(b, 1, 1, 1)
+        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)
+        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)
 
-        mahabolis = -0.5 * torch.einsum("brij,brjk,brkl,brlp->brip", V_inv, R_flatten.transpose(-1, -2), U_inv, R_flatten)
-        mahabolis = mahabolis.diagonal(offset=0, dim1=-1, dim2=-2).sum(-1)
+        # mahabolis = -0.5 * torch.einsum("brij,brjk,brkl,brlp->brip", V_inv, R_flatten.transpose(-1, -2), U_inv, R_flatten)
+        # mahabolis = mahabolis.diagonal(offset=0, dim1=-1, dim2=-2).sum(-1)
         Ulogdet = torch.logdet(U_inv)
         Vlogdet = torch.logdet(V_inv)
+        Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
+        Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
+
+        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
 
         nll = -(-n*t/2 * math.log(2*math.pi) + mahabolis + n/2 * Vlogdet + t/2 * Ulogdet)
         return nll
