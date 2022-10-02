@@ -17,9 +17,11 @@ from tqdm import tqdm
 import sys
 sys.argv = ['']
 parser = argparse.ArgumentParser()
-parser.add_argument('--device', type=str, default='cpu', help='')
+parser.add_argument('--device', type=str, default='cuda', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+# parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
+# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -56,6 +58,12 @@ args = parser.parse_args()
 
 # model_path = "logs/GWNMDN_residual_20220825-094251_N8_R12_reg0.0_nhid16_pred[2, 5, 8, 11]_rho0.01_diagFalse_msecoef1.0"
 
+# --gcn_bool --adjtype doubletransition --addaptadj  --randomadj
+args.gcn_bool = True
+args.addaptadj = True
+args.adjtype = "doubletransition"
+args.randomadj = True
+
 
 def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes):
 
@@ -65,8 +73,11 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     num_rank = int(params[1].split("R")[1])
     reg_coef = float(params[2].split("reg")[1])
     nhid = int(params[3].split("nhid")[1])
-    # pred_len = int(params[4].split("pred")[1])
-    pred_len = [2, 5, 8, 11]
+    pred_len = int(params[4].split("pred")[1])
+    if pred_len == 4:
+        pred_len = [2, 5, 8, 11]
+    elif pred_len == 12:
+        pred_len = list(range(12))
     rho = float(params[5].split("rho")[1])
 
     # set seed
@@ -88,7 +99,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     if args.aptonly:
         supports = None
 
-    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
+    # adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -187,7 +198,7 @@ if __name__ == "__main__":
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
     flow = False
-    logpath = "logspemsbay2022speed325"
+    logpath = "logspemsbay2017spped3250922"
     savepath = f"out_{logpath}.csv"
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,

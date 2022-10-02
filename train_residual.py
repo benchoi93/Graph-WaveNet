@@ -13,6 +13,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+# parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
+# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -20,7 +22,7 @@ parser.add_argument('--addaptadj', action='store_true', help='whether add adapti
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
-parser.add_argument('--nhid', type=int, default=16, help='')
+parser.add_argument('--nhid', type=int, default=32, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -43,11 +45,12 @@ parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=1)
 parser.add_argument("--flow", action="store_true")
 parser.add_argument('--nonlinearity', type=str, default='softplus', choices=["softmax", "softplus", "elu", "sigmoid", "exp"])
+parser.add_argument('--loss', type=str, default='maskedmae', choices=["maskedmse", "maskedmae"])
 
 args = parser.parse_args()
 
-# args.pred_len = [2, 5, 8, 11]
-args.pred_len = list(range(12))
+args.pred_len = [2, 5, 8, 11]
+# args.pred_len = list(range(12))
 
 
 def main():
@@ -92,7 +95,7 @@ def main():
     if args.aptonly:
         supports = None
 
-    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
+    # adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 
     # A = (adjinit != 0).float()
     # A[torch.arange(A.shape[0]), torch.arange(A.shape[0])] = 0
@@ -127,7 +130,7 @@ def main():
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
                          outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
-                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity)
+                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity, loss=args.loss)
 
     print("start training...", flush=True)
     his_loss = []
@@ -196,7 +199,7 @@ def main():
             valid_crps_loss.append(metrics["crps"])
             valid_es_loss.append(metrics["ES"])
 
-            if i % 1 == 0:
+            if i % 10 == 0:
                 if iter == 0:
                     engine.plot_cov()
 

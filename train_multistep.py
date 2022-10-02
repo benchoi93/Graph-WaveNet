@@ -13,6 +13,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+# parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
+# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -32,21 +34,22 @@ parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--seed', type=int, default=99, help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=10, help='experiment id')
+parser.add_argument('--n_components', type=int, default=1, help='experiment id')
 parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
 parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
 parser.add_argument("--outlier_distribution", action="store_true", help="outlier_distribution")
 parser.add_argument("--pred-len", type=int, default=12)
-parser.add_argument("--rho", type=float, default=0.01)
+parser.add_argument("--rho", type=float, default=0.1)
 parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=0.1)
 parser.add_argument("--flow", action="store_true")
+parser.add_argument('--loss', type=str, default='maskedmae', choices=["maskedmse", "maskedmae", "mse", "mae"])
 
 args = parser.parse_args()
 
-# args.pred_len = [2, 5, 8, 11]
-args.pred_len = list(range(12))
+args.pred_len = [2, 5, 8, 11]
+# args.pred_len = list(range(12))
 
 
 def main():
@@ -91,7 +94,7 @@ def main():
     if args.aptonly:
         supports = None
 
-    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
+    # adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -117,7 +120,7 @@ def main():
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
                          outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
-                         mse_coef=args.mse_coef)
+                         mse_coef=args.mse_coef, loss=args.loss)
 
     print("start training...", flush=True)
     his_loss = []
@@ -186,9 +189,9 @@ def main():
             valid_crps_loss.append(metrics["crps"])
             valid_es_loss.append(metrics["ES"])
 
-            # if i % 10 == 0:
-            #     if iter == 0:
-            #         engine.plot_cov(metrics)
+            if i % 1 == 0:
+                if iter == 0:
+                    engine.plot_cov(metrics)
 
         test_loss = []
         test_mape = []

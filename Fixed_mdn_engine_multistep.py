@@ -139,7 +139,8 @@ class LowRankMDNhead(nn.Module):
 class CholeskyMDNhead(LowRankMDNhead):
     def __init__(self, n_components, n_vars, n_rank, pred_len=12, reg_coef=0.1,
                  consider_neighbors=False, outlier_distribution=False,
-                 outlier_distribution_kwargs=None, mse_coef=0.1, rho=0.1, diag=False):
+                 outlier_distribution_kwargs=None, mse_coef=0.1, rho=0.1, diag=False,
+                 loss="mse"):
 
         self.n_components = n_components
         self.n_vars = n_vars
@@ -161,6 +162,15 @@ class CholeskyMDNhead(LowRankMDNhead):
         self.training = True
         self.diag = diag
 
+        if loss == "maskedmse":
+            self.loss_fn = util.masked_mse
+        elif loss == "maskedmae":
+            self.loss_fn = util.masked_mae
+        elif loss == "mse":
+            self.loss_fn = nn.MSELoss(reduce="mean")
+        elif loss == "mae":
+            self.loss_fn = nn.L1Loss(reduce="mean")
+
     def forward(self, features):
         # input : features = dict of tensors
         #    - features['w'] : (batch_size, n_components)
@@ -168,11 +178,11 @@ class CholeskyMDNhead(LowRankMDNhead):
         #    - features['D'] : (batch_size, n_components, n_vars)
         #    - features['V'] : (batch_size, n_components, n_vars, n_rank)
         y = features['target']
-        target = y[:, :, self.pred_len]
+        target = y
         # features['target'] = target
 
         dist = self.get_output_distribution(features)
-        target = y[:, :, self.pred_len].reshape(y.shape[0], -1)
+        target = y.reshape(y.shape[0], -1)
         nll_loss = - dist.log_prob(target).mean() if self.rho != 0 else 0
 
         reg_loss = 0 if self.reg_coef != 0 else 0  # TODO
@@ -181,9 +191,17 @@ class CholeskyMDNhead(LowRankMDNhead):
 
         # min_mse, _ = ((dist.mean - target)**2).min(1)
         # min_mse, _ = ((features["mu"] - target.unsqueeze(1)) ** 2).min(1)
-        mse_loss = ((features["mu"] - target)**2).mean()
+        u_target = features["unscaled_target"]
+        predict = features["scaler"].inverse_transform(features["mu"]).reshape(u_target.shape)
+
+        # mse_loss = ((predict - u_target).abs()).mean()
+        # mse_loss = util.masked_mse(predict, u_target, 0.0)
+        mse_loss = self.loss_fn(predict, u_target)
+        # mse_loss = ((features["mu"] - target)**2).mean()
+        # mse_loss = ((features["mu"] - target).abs()).mean()
 
         loss = self.rho * nll_loss + reg_loss * self.reg_coef + self.mse_coef * mse_loss
+        # loss = self.rho * nll_loss + reg_loss * self.reg_coef + self.mse_coef * mse_loss
         # loss = mse_loss
 
         if isinstance(nll_loss, torch.Tensor):
@@ -253,7 +271,8 @@ class CholeskyMDNhead(LowRankMDNhead):
 
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
-                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1):
+                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1,
+                 loss="mse"):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -285,7 +304,7 @@ class MDN_trainer():
         # self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
         self.mdn_head = CholeskyMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef, pred_len=pred_len,
                                         consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution,
-                                        mse_coef=mse_coef, diag=diag, rho=rho)
+                                        mse_coef=mse_coef, diag=diag, rho=rho, loss=loss)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -314,7 +333,7 @@ class MDN_trainer():
 
         import datetime
         # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
-        self.logdir = f'./logs/GWNMDN_multistep_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_nodes}_reg{reg_coef}_nhid{nhid}_pred{pred_len}_rho{rho}_diag{diag}_msecoef{mse_coef}'
+        self.logdir = f'./logs/GWNMDN_multistep-{loss}loss_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_nodes}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}'
 
         self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
@@ -367,10 +386,27 @@ class MDN_trainer():
         output = output.reshape(-1, self.n_components*self.num_nodes * self.out_per_comp)
         w = self.fc_w(output)
         w = self.softmax(w)
+        real = real_val[:, :, self.pred_len]
+
+        info = {
+            "w": w,
+            "mu": mus,
+            "scale_tril": L,
+            # "loss": loss.item(),
+            # "mape": mape,
+            # "rmse": rmse,
+            # "nll_loss": nll_loss,
+            # "reg_loss": reg_loss,
+            # "mse_loss": mse_loss,
+            # "crps": crps
+            "target": self.scaler.transform(real),
+            "unscaled_target": real,
+            "scaler": self.scaler
+        }
 
         scaled_real_val = self.scaler.transform(real_val)
         loss, nll_loss, reg_loss, mse_loss = self.mdn_head.forward(
-            features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val})
+            features=info)
 
         if not eval:
             self.optimizer.zero_grad()
@@ -380,8 +416,8 @@ class MDN_trainer():
             self.optimizer.step()
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
-        real = real_val[:, :, self.pred_len].reshape(real_val.shape[0], -1)
 
+        real = real_val[:, :, self.pred_len].reshape(real_val.shape[0], -1)
         # output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'scale_tril': L})
         output = self.mdn_head.get_output_distribution(
             features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val}).mean
@@ -390,21 +426,14 @@ class MDN_trainer():
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
 
-        # crps = self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val})
+        info["mape"] = mape
+        info["rmse"] = rmse
+        info["loss"] = loss.item()
+        info["nll_loss"] = nll_loss
+        info["reg_loss"] = reg_loss
+        info["mse_loss"] = mse_loss
 
-        info = {
-            "w": w,
-            "mu": mus,
-            "scale_tril": L,
-            "loss": loss.item(),
-            "mape": mape,
-            "rmse": rmse,
-            "nll_loss": nll_loss,
-            "reg_loss": reg_loss,
-            "mse_loss": mse_loss,
-            # "crps": crps
-            "target": self.scaler.transform(real)
-        }
+        # crps = self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val})
 
         return info
 

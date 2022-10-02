@@ -23,8 +23,10 @@ parser = argparse.ArgumentParser()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda', help='')
-parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
-parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+# parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022', help='data path')
+# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
+parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -59,6 +61,11 @@ args = parser.parse_args()
 # GWN_MDN_20220607-133432_N5_R5_reg0.001_nhid4_neiTrue
 
 model_path = "logs/GWNMDN_multistep_20220830-151940_N10_R12_reg0.1_nhid16_pred[2, 5, 8, 11]_rho0.01_diagFalse_msecoef0.1"
+# --gcn_bool --adjtype doubletransition --addaptadj  --randomadj
+args.gcn_bool = True
+args.addaptadj = True
+args.adjtype = "doubletransition"
+args.randomadj = True
 
 
 def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes):
@@ -70,6 +77,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     reg_coef = float(params[2].split("reg")[1])
     nhid = int(params[3].split("nhid")[1])
     pred_len = [2, 5, 8, 11]
+    # pred_len = list(range(12))
     rho = float(params[5].split("rho")[1])
     diag = True if params[6].split("diag")[1] == "True" else False
     mse_coef = float(params[7].split("coef")[1])
@@ -89,7 +97,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     if args.aptonly:
         supports = None
 
-    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
+    # adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -192,7 +200,7 @@ if __name__ == "__main__":
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
     flow = False
-    logpath = "logspemsbay2022speed325"
+    logpath = "logs"
     savepath = f"out_{logpath}.csv"
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
@@ -203,18 +211,18 @@ if __name__ == "__main__":
     # file_list = [x for x in os.listdir("logs") if "GWN_MDNdiag_20220623" in x]
     # file_list = ["GWN_MDNdiag_20220624-132309_N1_R5_reg0.01_nhid4_pred36", "GWN_MDNdiag_20220624-132314_N1_R5_reg0.001_nhid4_pred36"]
     print(file_list)
-    try:
-        result = pd.read_csv(savepath)
-    except:
-        result = pd.DataFrame(np.zeros((0, 4)))
+    # try:
+    # result = pd.read_csv(savepath)
+    # except:
+    result = pd.DataFrame(np.zeros((0, 6)))
 
     for file in file_list:
         # model_path = f"logs/{file}"
         print(file)
         # try:
-        if file in result["0"].tolist():
-            print("already done")
-            continue
+        # if file in result["0"].tolist():
+        #     print("already done")
+        #     continue
 
         done, result_rmse, result_mape, result_mae, result_crps, result_ES = main(
             f"{logpath}/{file}", dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes)
