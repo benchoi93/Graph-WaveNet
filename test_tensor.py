@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
 # from Fixed_mdn_engine import MDN_trainer
-from Fixed_mdn_engine_residual import MDN_trainer
+from Fixed_mdn_engine_tensor import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
 import torch.nn as nn
 import seaborn as sns
@@ -118,7 +118,6 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     # engine.fc_wt.eval()
 
     results = []
-    # crps_list = []
     for iter, (x, y) in tqdm(enumerate(dataloader['test_loader'].get_iterator()), total=dataloader['test_loader'].num_batch):
         with torch.no_grad():
             testx = torch.Tensor(x).to(device)
@@ -127,32 +126,26 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
             testy = testy.transpose(1, 3)
             # info = engine.train(testx, testy[:, 0, :, :], eval=True)
             info = engine.eval(testx, testy[:, 0, :, :])
-            # crps_list.append(info["crps"])
 
-        mu = info['mu'].reshape(info['mu'].shape[0], num_nodes, engine.num_pred)
-        mu = engine.scaler.inverse_transform(mu)
-        mu[mu < 0] = 0
+        pred = info['pred'].reshape(info['pred'].shape[0], num_nodes, engine.num_pred)
+        pred[pred < 0] = 0
+
+        # mu = info['mu'].reshape(info['mu'].shape[0], num_nodes, engine.num_pred)
+        # mu = scaler.inverse_transform(mu)
+        # mu[mu < 0] = 0
+        # pred = mu
+
         target = testy[:, 0, :, pred_len]
         info["target"] = engine.scaler.transform(target).reshape(target.shape[0], -1)
-
-        # crps, ES = engine.get_crps(info)
-        # crps = crps.unsqueeze(1).expand((crps.shape[0], num_nodes, engine.num_pred))
-        # crps = crps.reshape(crps.shape[0], num_nodes, engine.num_pred)
-        # crps = torch.FloatTensor(crps).to(device)
 
         results_timestep = []
         for i in range(engine.num_pred):
             mask = target[:, :, i] > 0
 
-            rmse = ((((mu[:, :, i]-target[:, :, i])**2) * mask).sum() / mask.sum()).sqrt()
-            mape = ((((mu[:, :, i] - target[:, :, i]).abs() / (target[:, :, i] + 1e-6)) * mask).sum() / mask.sum()) * 100
-            mae = ((mu[:, :, i] - target[:, :, i]).abs() * mask).sum() / mask.sum()
+            rmse = ((((pred[:, :, i]-target[:, :, i])**2) * mask).sum() / mask.sum()).sqrt()
+            mape = ((((pred[:, :, i] - target[:, :, i]).abs() / (target[:, :, i] + 1e-6)) * mask).sum() / mask.sum()) * 100
+            mae = ((pred[:, :, i] - target[:, :, i]).abs() * mask).sum() / mask.sum()
 
-            # crps_i = (crps[:, :, i] * mask).sum() / mask.sum()
-            # print(f"{mask.sum() / (mask.shape[0]*mask.shape[1])*100:.2f}")
-            # ES_i = ES[(target == 0).sum((-1, -2)) == 0].mean()
-
-            # results_timestep.append([rmse.item(), mape.item(), mae.item(), crps_i.item(), ES_i.item()])
             results_timestep.append([rmse.item(), mape.item(), mae.item()])
 
         results.append(
@@ -165,10 +158,7 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     result_rmse = np.nanmean(results_item[:, :, 0], (0))
     result_mape = np.nanmean(results_item[:, :, 1], (0))
     result_mae = np.nanmean(results_item[:, :, 2], (0))
-    # result_crps = np.nanmean(results_item[:, :, 3], (0))
-    # result_ES = np.nanmean(results_item[:, :, 4], (0))
 
-    # return result_rmse, result_mape, result_mae, result_crps, result_ES
     return result_rmse, result_mape, result_mae
 
 
@@ -206,7 +196,7 @@ if __name__ == "__main__":
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
                                    target_sensor_inds=target_sensor_inds, flow=flow)
 
-    file_list = [x for x in os.listdir(logpath) if "residual" in x]
+    file_list = [x for x in os.listdir(logpath) if "tensor" in x]
     # file_list = [x for x in os.listdir("logs") if "0808" in x]
     # file_list = [x for x in os.listdir("logs") if "GWN_MDNdiag_20220623" in x]
     # file_list = ["GWN_MDNdiag_20220624-132309_N1_R5_reg0.01_nhid4_pred36", "GWN_MDNdiag_20220624-132314_N1_R5_reg0.001_nhid4_pred36"]

@@ -122,51 +122,77 @@ class CholeskyResHead(nn.Module):
         # mae_loss = util.masked_mae(features["mu"], target, 0.0)
         # u_target = features["unscaled_target"]
         # predict = features["scaler"].inverse_transform(features["mu"]).reshape(u_target.shape)
-        predict = features["mu"]
+        predict = features["mu"] + features["R"].sum(-1)
+        # predict = features["mu"]
+
+        target = features["unscaled_target"]
+        predict = features["scaler"].inverse_transform(predict)
+        predict = predict.reshape(target.shape)
 
         # mse_loss = ((predict - u_target).abs()).mean()
         # mse_loss = util.masked_mse(predict, target, features["scaler"].transform(0.0))
         # mse_loss = self.loss_fn(predict, u_target, 0.0)
         # mse_loss = self.loss_fn(predict, target, features["scaler"].transform(0.0))
-        mse_loss = ((predict - target)**2).mean()
+        # mse_loss = ((predict - target)**2).mean()
         # mse_loss = ((features["mu"] - target).abs()).mean()
+        mse_loss = util.masked_mae(predict, target, 0.0)
 
-        loss = self.rho * nll_loss + self.mse_coef * mse_loss
+        loss = self.rho * nll_loss + reg_loss * self.reg_coef + self.mse_coef * mse_loss
         # loss = mse_loss
 
         return loss, nll_loss.item(), reg_loss, mse_loss.item()
 
     def get_nll(self, features, target):
         mu, R, L_s, L_t = self.get_parameters(features)
+        w = features["w"]
+        logw = w.log().squeeze(-1)
 
         b, n, t, r = R.shape
-        n = self.n_vars
-        t = len(self.pred_len)
+
+        # mu = mu.reshape(target.shape)
 
         R_ext = torch.concat([R, (target - mu - R.sum(-1)).unsqueeze(-1)], dim=-1)
         R_flatten = R_ext.permute(0, 3, 1, 2)
         # R_flatten = R_ext.reshape(b, r+1, n*t).reshape(b, r+1, n, t)
 
-        U_inv = torch.einsum("rij, rjk ->rik", L_s, L_s.transpose(-1, -2))
-        V_inv = torch.einsum("rij, rjk ->rik", L_t, L_t.transpose(-1, -2))
-        # U_inv = U_inv.unsqueeze(0).repeat(b, 1, 1, 1)
-        # V_inv = V_inv.unsqueeze(0).repeat(b, 1, 1, 1)
-
-        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)
-        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)
-
-        # mahabolis = -0.5 * torch.einsum("brij,brjk,brkl,brlp->brip", V_inv, R_flatten.transpose(-1, -2), U_inv, R_flatten)
-        # mahabolis = mahabolis.diagonal(offset=0, dim1=-1, dim2=-2).sum(-1)
-        Ulogdet = torch.logdet(U_inv)
-        Vlogdet = torch.logdet(V_inv)
         Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
         Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
+        Ulogdet = Ulogdet.unsqueeze(0)
+        Vlogdet = Vlogdet.unsqueeze(0)
 
-        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        # cov_s = L_s @ L_s.transpose(-1, -2)
+        # prc_s = cov_s.inverse()
+        # L_prc_s = torch.linalg.cholesky(prc_s)
+        # L_s_inv = L_s.inverse()
+        L_s_inv = torch.inverse(L_s)
+        L_t_inv = torch.inverse(L_t)
+
+        # Q_t = torch.einsum("rij,brjk,rkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        Q_t = torch.einsum("rij,brjk,rkl->bril", L_s_inv, R_flatten, L_t_inv.transpose(-1, -2))
+        Q_t = Q_t * ((1/w).sqrt()).unsqueeze(-1)
         mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+        detinvcov = (-n*t/2 * logw - t/2 * Ulogdet - n/2 * Vlogdet)
 
-        nll = -(-n*t/2 * math.log(2*math.pi) + mahabolis + n/2 * Vlogdet + t/2 * Ulogdet)
-        return nll
+        nll = -(-n*t/2 * math.log(2*math.pi) + mahabolis + detinvcov)
+
+        # U = torch.einsum("bij, bjk-> bik", L_s, L_s.transpose(-1, -2))
+        # V = torch.einsum("bij, bjk-> bik", L_t, L_t.transpose(-1, -2))
+
+        # cov = util.kron(U, V)
+        # cov = (w).unsqueeze(-1) * cov.unsqueeze(0)
+        # cov = cov.reshape(-1, 5, 144, 144)
+        # prc = torch.inverse(cov)
+        # Rtemp = R_flatten.reshape(-1, 5, 144)
+
+        # mahabolis2 = torch.stack([torch.einsum("bij,bjk,bkl->bil", Rtemp[:, i, :].unsqueeze(1),
+        #                          prc[:, i, :, :], Rtemp[:, i, :].unsqueeze(-1)) for i in range(5)], 1)
+        # mahabolis2 = mahabolis2.squeeze()*0.5
+
+        # detinvcov2 = torch.logdet(cov)*0.5
+        # nll2 = torch.stack([Dist.MultivariateNormal(loc=torch.zeros(64, 144, device=prc.device),
+        #                    covariance_matrix=cov[:, i, :, :]).log_prob(Rtemp[:, i, :]) for i in range(5)], 1)
+
+        return nll.sum(-1)
 
     def get_output_distribution(self, features, consider_neighbors=False):
         # input : features
@@ -191,7 +217,7 @@ class CholeskyResHead(nn.Module):
     def sample(self, features, nsample=None):
         # dist = self.get_output_distribution(features)
         mu, R, L_s, L_t = self.get_parameters(features)
-        b, n, t, r = R.shape
+        b, nt, r = R.shape
         n = self.n_vars
         t = len(self.pred_len)
 
@@ -230,8 +256,8 @@ class CholeskyResHead(nn.Module):
 
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
-                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1, nonlinearity="sigmoid",
-                 loss="maskedmse", summary=True):
+                 mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1, nonlinearity="softplus",
+                 loss="maskedmse"):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -264,25 +290,28 @@ class MDN_trainer():
         self.res_head = CholeskyResHead(n_components, num_nodes, num_rank, reg_coef=reg_coef, pred_len=pred_len,
                                         consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution,
                                         mse_coef=mse_coef, rho=rho, loss=loss)
-        # dim_w = [batn_components]
-        # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
-        # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
-        # self.covariance = FixedMDN(n_components, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0)
+
         self.covariance = FixedResCov(num_rank, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0)
+
+        self.fc_w = nn.Sequential(
+            nn.Linear(self.num_nodes * self.num_pred, nhid),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(nhid, nhid),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(nhid, 1)
+        )
 
         self.model_list = nn.ModuleDict(
             {
                 'model': self.model,
                 'res_head': self.res_head,
                 'covariance': self.covariance,
+                'fc_w': self.fc_w
             }
         )
         self.model_list.to(device)
-        # self.model.to(device)
-        # self.covariance.to(device)
-        # # self.mdn_head.to(device)
-        # self.fc_ws.to(device)
-        # self.fc_wt.to(device)
 
         # self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_ws.parameters()) + list(self.fc_wt.parameters()) +
         #                             list(self.covariance.parameters()), lr=lrate, weight_decay=wdecay)
@@ -293,11 +322,9 @@ class MDN_trainer():
 
         import datetime
         # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
-        self.logdir = f'./logs/GWNMDN_residual_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}_nlin{nonlinearity}'
+        self.logdir = f'./logs/GWNMDN_ResMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}_nlin{nonlinearity}'
 
-        if summary:
-            self.summary = SummaryWriter(logdir=f'{self.logdir}')
-
+        self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
         self.log_softmax = nn.LogSoftmax(dim=-1)
         # self.softmax = nn.Softmax(dim=-1)
@@ -347,8 +374,10 @@ class MDN_trainer():
         L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)] = \
             self.act(L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)])
 
-        # L_temporal[:, 0, 0] = 1
-        L_temporal = L_temporal / L_temporal[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
+        L_temporal[:, 0, 0] = 1
+        L_spatial[:, 0, 0] = 1
+        # L_temporal = L_temporal / L_temporal[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
+        # L_spatial = L_spatial / L_spatial[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
 
         return L_spatial, L_temporal
 
@@ -363,7 +392,10 @@ class MDN_trainer():
         output = self.model(input)
         output = output.transpose(1, 3)
 
-        output = output.reshape(-1, self.num_nodes, self.num_pred, self.num_rank)
+        output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.num_rank)
+        fc_in = output.permute(0, 3, 2, 1).reshape(-1, self.num_rank, self.num_nodes * self.num_pred)
+        w = self.fc_w(fc_in)
+        w = nn.Softplus()(w)
 
         mus = output[:, :, :, 0]
         R = output[:, :, :, 1:]
@@ -381,6 +413,7 @@ class MDN_trainer():
 
         features = {
             'mu': mus,
+            'w': w,
             'R': R,
             'L_spatial': L_spatial,
             'L_temporal': L_temporal,
@@ -415,10 +448,6 @@ class MDN_trainer():
 
         # crps = self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val})
 
-        mape_list = [util.masked_mape(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
-        rmse_list = [util.masked_rmse(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
-        mae_list = [util.masked_mae(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
-
         features["loss"] = loss.item()
         features["nll_loss"] = nll_loss
         features["reg_loss"] = reg_loss
@@ -426,10 +455,15 @@ class MDN_trainer():
         features["mape"] = mape
         features["rmse"] = rmse
         features["target"] = self.scaler.transform(real)
-
-        features["mape_list"] = mape_list
-        features["rmse_list"] = rmse_list
-        features["mae_list"] = mae_list
+        # # "cov": cov_new,
+        # "loss": loss.item(),
+        # "mape": mape,
+        # "rmse": rmse,
+        # "nll_loss": nll_loss,
+        # "reg_loss": reg_loss,
+        # "mse_loss": mse_loss,
+        # # "crps": crps
+        # "target": self.scaler.transform(real)
 
         return features
 
@@ -527,8 +561,8 @@ class MDN_trainer():
         sample_cov_spatial = torch.einsum("bij,bjk->bik", L_spatial, L_spatial.transpose(-1, -2))
         sample_cov_temporal = torch.einsum("bij,bjk->bik", L_temporal, L_temporal.transpose(-1, -2))
 
-        sample_cov_spatial = torch.inverse(sample_cov_spatial)
-        sample_cov_temporal = torch.inverse(sample_cov_temporal)
+        # sample_cov_spatial = torch.inverse(sample_cov_spatial)
+        # sample_cov_temporal = torch.inverse(sample_cov_temporal)
 
         corr_spatial = torch.zeros_like(sample_cov_spatial)
         for i in range(sample_cov_spatial.size(0)):

@@ -6,15 +6,13 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
-from Fixed_mdn_engine_residual import MDN_trainer
+from Fixed_mdn_engine_resmix import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
-# parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
-# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -22,7 +20,7 @@ parser.add_argument('--addaptadj', action='store_true', help='whether add adapti
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
-parser.add_argument('--nhid', type=int, default=32, help='')
+parser.add_argument('--nhid', type=int, default=16, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -40,17 +38,21 @@ parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--consider_neighbors", action="store_true", help="consider neighbors")
 parser.add_argument("--outlier_distribution", action="store_true", help="outlier_distribution")
 parser.add_argument("--pred-len", type=int, default=12)
-parser.add_argument("--rho", type=float, default=0.01)
+parser.add_argument("--rho", type=float, default=0.001)
 parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=1)
 parser.add_argument("--flow", action="store_true")
-parser.add_argument('--nonlinearity', type=str, default='softplus', choices=["softmax", "softplus", "elu", "sigmoid", "exp"])
-parser.add_argument('--loss', type=str, default='maskedmae', choices=["maskedmse", "maskedmae"])
+parser.add_argument('--nonlinearity', type=str, default='softplus', choices=["softmax", "softplus", "elu"])
 
 args = parser.parse_args()
 
-args.pred_len = [2, 5, 8, 11]
-# args.pred_len = list(range(12))
+# args.pred_len = [2, 5, 8, 11]
+args.pred_len = list(range(12))
+# --gcn_bool --adjtype doubletransition --addaptadj  --randomadj
+args.gcn_bool = True
+args.addaptadj = True
+args.randomadj = True
+args.adjtype = 'doubletransition'
 
 
 def main():
@@ -77,13 +79,14 @@ def main():
 
     target_sensors = sensor_ids
 
-    target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
     args.num_nodes = len(target_sensors)
+
+    target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
 
     dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size,
                                    target_sensor_inds=target_sensor_inds, flow=args.flow)
     scaler = dataloader['scaler']
-    supports = [torch.tensor(i).to(device) for i in adj_mx]
+    supports = [torch.tensor(i).to(device)[:, target_sensor_inds][target_sensor_inds, :] for i in adj_mx]
 
     print(args)
 
@@ -96,15 +99,6 @@ def main():
         supports = None
 
     # adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
-
-    # A = (adjinit != 0).float()
-    # A[torch.arange(A.shape[0]), torch.arange(A.shape[0])] = 0
-    # D = A.sum(0)
-    # L = A - torch.diag(D)
-    # L = L.float()
-
-    # # eigenvalues of L
-    # eigvals, eigvecs = torch.eig(L, eigenvectors=True)
 
     # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
     #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
@@ -130,7 +124,7 @@ def main():
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
                          outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
-                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity, loss=args.loss)
+                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity)
 
     print("start training...", flush=True)
     his_loss = []
@@ -138,7 +132,7 @@ def main():
     train_time = []
 
     best_val_loss = float('inf')
-    for i in range(args.epochs):
+    for i in range(0, args.epochs+1):
         # if i % 10 == 0:
         #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
         # for g in engine.optimizer.param_groups:
@@ -212,10 +206,6 @@ def main():
         test_crps_loss = []
         test_es_loss = []
 
-        test_mape_list = []
-        test_rmse_list = []
-        test_mae_list = []
-
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
@@ -233,10 +223,6 @@ def main():
             test_mse_loss.append(metrics['mse_loss'])
             test_crps_loss.append(metrics["crps"])
             test_es_loss.append(metrics["ES"])
-
-            test_mape_list.append(metrics['mape_list'])
-            test_rmse_list.append(metrics['rmse_list'])
-            test_mae_list.append(metrics['mae_list'])
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -256,8 +242,6 @@ def main():
         mvalid_crps_loss = np.mean(valid_crps_loss)
         mvalid_es_loss = np.mean(valid_es_loss)
 
-        his_loss.append(mvalid_loss)
-
         mtest_loss = np.mean(test_loss)
         mtest_mape = np.mean(test_mape)
         mtest_rmse = np.mean(test_rmse)
@@ -265,10 +249,6 @@ def main():
         mtest_reg_loss = np.mean(test_reg_loss)
         mtest_crps_loss = np.mean(test_crps_loss)
         mtest_es_loss = np.mean(test_es_loss)
-
-        mtest_mape_list = np.mean(np.array(test_mape_list), 0)
-        mtest_rmse_list = np.mean(np.array(test_rmse_list), 0)
-        mtest_mae_list = np.mean(np.array(test_mae_list), 0)
 
         his_loss.append(mvalid_loss)
 
@@ -301,11 +281,6 @@ def main():
         engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
         engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
 
-        for j in range(len(args.pred_len)):
-            engine.summary.add_scalar(f'errors_spec/test_mape_{j}', mtest_mape_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_rmse_{j}', mtest_rmse_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_mae_{j}', mtest_mae_list[j], i)
-
         # engine.summary.add_scalar('loss/rho', torch.sigmoid(engine.covariance.rho).item(), i)
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
@@ -313,10 +288,10 @@ def main():
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            if best_val_loss > mvalid_mape:
-                best_val_loss = mvalid_mape
+            if best_val_loss > mvalid_crps_loss:
+                best_val_loss = mvalid_crps_loss
                 engine.save(best=True)
-                print(f"Saved best model at epoch {i} with loss {best_val_loss}")
+                print("Saved best model")
 
             else:
                 engine.save()
@@ -325,7 +300,9 @@ def main():
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
 
-    engine.load(model_path=f'{engine.logdir}/best_model_list.pt')
+    engine.load(model_path=f'{engine.logdir}/best_model.pt',
+                cov_path=f'{engine.logdir}/best_covariance.pt',
+                fc_w_path=f'{engine.logdir}/best_fc_w.pt')
 
     test_loss = []
     test_mape = []
@@ -334,6 +311,7 @@ def main():
     test_reg_loss = []
     test_mse_loss = []
     test_crps_loss = []
+    test_es_loss = []
 
     s1 = time.time()
     for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
@@ -351,6 +329,7 @@ def main():
         test_reg_loss.append(metrics['reg_loss'])
         test_mse_loss.append(metrics['mse_loss'])
         test_crps_loss.append(metrics["crps"])
+        test_es_loss.append(metrics["es"])
 
     mtest_loss = np.mean(test_loss)
     mtest_mape = np.mean(test_mape)
@@ -359,6 +338,7 @@ def main():
     mtest_reg_loss = np.mean(test_reg_loss)
     mtest_mse_loss = np.mean(test_mse_loss)
     mtest_crps_loss = np.mean(test_crps_loss)
+    mtest_es_loss = np.mean(test_es_loss)
 
     print("Testing Results:")
     print("Test Loss: {:.4f}".format(mtest_loss))
@@ -368,6 +348,7 @@ def main():
     print("Test Reg Loss: {:.4f}".format(mtest_reg_loss))
     print("Test MSE Loss: {:.4f}".format(mtest_mse_loss))
     print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
+    print("Test ES Loss: {:.4f}".format(mtest_es_loss))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/compat/__init__.py", line 42, in tf
+    from tensorboard.compat import notf  # noqa: F401
+ImportError: cannot import name 'notf' from 'tensorboard.compat' (/usr/local/lib/python3.8/dist-packages/tensorboard/compat/__init__.py)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/bin/tensorboard", line 8, in <module>
+    sys.exit(run_main())
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/main.py", line 39, in run_main
+    main_lib.global_init()
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/main_lib.py", line 40, in global_init
+    if getattr(tf, "__version__", "stub") == "stub":
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/lazy.py", line 65, in __getattr__
+    return getattr(load_once(self), attr_name)
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/lazy.py", line 97, in wrapper
+    cache[arg] = f(arg)
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/lazy.py", line 50, in load_once
+    module = load_fn()
+  File "/usr/local/lib/python3.8/dist-packages/tensorboard/compat/__init__.py", line 45, in tf
+    import tensorflow
+  File "/usr/local/lib/python3.8/dist-packages/tensorflow/__init__.py", line 37, in <module>
+    from tensorflow.python.tools import module_util as _module_util
+  File "/usr/local/lib/python3.8/dist-packages/tensorflow/python/__init__.py", line 91, in <module>
+    from tensorflow.python.training import training as train
+  File "/usr/local/lib/python3.8/dist-packages/tensorflow/python/training/training.py", line 118, in <module>
+    from tensorflow.python.training.learning_rate_decay import *
+  File "<frozen importlib._bootstrap>", line 991, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 975, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 671, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 844, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 939, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1037, in get_data
+KeyboardInterrupt
+
+NOTE: Using experimental fast data loading logic. To disable, pass
+    "--load_fast=false" and report issues on GitHub. More details:
+    https://github.com/tensorflow/tensorboard/issues/4784
+
+Serving TensorBoard on localhost; to expose to the network, use a proxy or pass --bind_all
+TensorBoard 2.8.0 at http://localhost:6007/ (Press CTRL+C to quit)

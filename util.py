@@ -183,7 +183,7 @@ def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size
     return data
 
 
-def masked_mse(preds, labels, null_val=np.nan):
+def masked_mse(preds, labels, null_val=0.0):
     if np.isnan(null_val):
         mask = ~torch.isnan(labels)
     else:
@@ -201,7 +201,7 @@ def masked_rmse(preds, labels, null_val=np.nan):
     return torch.sqrt(masked_mse(preds=preds, labels=labels, null_val=null_val))
 
 
-def masked_mae(preds, labels, null_val=np.nan):
+def masked_mae(preds, labels, null_val=0.0):
     if np.isnan(null_val):
         mask = ~torch.isnan(labels)
     else:
@@ -226,7 +226,7 @@ def masked_mape(preds, labels, null_val=np.nan):
     loss = torch.abs(preds-labels)/labels
     loss = loss * mask
     loss = torch.where(torch.isnan(loss), torch.zeros_like(loss), loss)
-    return torch.mean(loss)
+    return torch.mean(loss) * 100
 
 
 def metric(pred, real):
@@ -234,6 +234,7 @@ def metric(pred, real):
     mape = masked_mape(pred, real, 0.0).item()
     rmse = masked_rmse(pred, real, 0.0).item()
     return mae, mape, rmse
+
 
 def kron(a, b):
     """
@@ -247,3 +248,33 @@ def kron(a, b):
     res = a.unsqueeze(-1).unsqueeze(-3) * b.unsqueeze(-2).unsqueeze(-4)
     siz0 = res.shape[:-4]
     return res.reshape(siz0 + siz1)
+
+
+def get_missing_rate(data, nanvalue=0):
+    num_missing = (data['x'][:, :, :, 0] == nanvalue).sum()
+    num_total = data['x'][:, :, :, 0].size
+
+    return num_missing / num_total * 100
+
+
+# metr = np.load("/app/data/METR-LA/train.npz")
+# pems = np.load("/app/data/PEMS-BAY/train.npz")
+# pems2022 = np.load("/app/data/PEMS-BAY-2022/train.npz")
+
+# print(get_missing_rate(metr))
+# print(get_missing_rate(pems))
+# print(get_missing_rate(pems2022))
+
+# (metr['x'][:, :, :, 0] == 0)
+
+# np.argsort((pems2022['x'][:, :, :, 0] == 0).sum((0, 1)))
+# np.sort((metr['x'][:, :, :, 0] == 0).sum((0, 1)))
+
+
+# ((pems2022['x'][:, :, list(np.argsort((pems2022['x'][:, :, :, 0] == 0).sum((0, 1)))[:-5]), 0] == 0).sum() /
+#  pems2022['x'][:, :, list(np.argsort((pems2022['x'][:, :, :, 0] == 0).sum((0, 1)))[:-5]), 0].size)*100
+
+
+# np.histogram((pems['x'][:, :, :, 0] == 0).sum((0, 1)), bins=100)
+# np.histogram((pems2022['x'][:, :, :, 0] == 0).sum((0, 1)), bins=100)
+# np.histogram((metr['x'][:, :, :, 0] == 0).sum((0, 1)), bins=100)
