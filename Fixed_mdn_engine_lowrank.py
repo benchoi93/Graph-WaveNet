@@ -122,8 +122,7 @@ class CholeskyResHead(nn.Module):
         # mae_loss = util.masked_mae(features["mu"], target, 0.0)
         # u_target = features["unscaled_target"]
         # predict = features["scaler"].inverse_transform(features["mu"]).reshape(u_target.shape)
-        predict = features["mu"] 
-        # predict = features["mu"] + features['R'].sum(-1)
+        predict = features["mu"]
 
         # mse_loss = ((predict - u_target).abs()).mean()
         # mse_loss = util.masked_mse(predict, target, features["scaler"].transform(0.0))
@@ -139,44 +138,51 @@ class CholeskyResHead(nn.Module):
         return loss, nll_loss.item(), reg_loss, mse_loss.item(), predict
 
     def get_nll(self, features, target):
-        mu, R, L_s, L_t = self.get_parameters(features)
+        mu, D, V = self.get_parameters(features)
 
-        b, n, t, r = R.shape
-        n = self.n_vars
-        t = len(self.pred_len)
+        # covariance = D + V V^T
+        # get NLL of multivariate Gaussian distribution
 
-        R_ext = torch.concat([R, (target - mu - R.sum(-1)).unsqueeze(-1)], dim=-1)
-        R_flatten = R_ext.permute(0, 3, 1, 2)
-        # R_flatten = R_ext.reshape(b, r+1, n*t).reshape(b, r+1, n, t)
+        b, n, t = mu.shape
+        r = V.shape[-1]
 
-        # U_inv = torch.einsum("rij, rjk ->rik", L_s, L_s.transpose(-1, -2))
-        # V_inv = torch.einsum("rij, rjk ->rik", L_t, L_t.transpose(-1, -2))
-        # U_inv = U_inv.unsqueeze(0).repeat(b, 1, 1, 1)
-        # V_inv = V_inv.unsqueeze(0).repeat(b, 1, 1, 1)
+        mu = mu.reshape(b, n*t)
+        target = target.reshape(b, n*t)
+        D = D.reshape(b, n*t)
+        V = V.reshape(b, n*t, r)
 
-        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)
-        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)
+        Z = target - mu
 
-        # mahabolis = -0.5 * torch.einsum("brij,brjk,brkl,brlp->brip", V_inv, R_flatten.transpose(-1, -2), U_inv, R_flatten)
-        # mahabolis = mahabolis.diagonal(offset=0, dim1=-1, dim2=-2).sum(-1)
-        # Ulogdet / torch.logdet(U_inv)
-        # Vlogdet / torch.logdet(V_inv)
-        Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1)
-        Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1)
+        # compute inverse of covariance usding woodbury matrix identity
+        # inv_cov = (D + V V^T)^-1
+        # inv_cov = D^-1 - D^-1 V (I + V^T D^-1 V)^-1 V^T D^-1
+        # core = I + V^T D^-1 V
+        # logdet_cov = logdet(D) + logdet(core)
+        D = torch.nn.functional.softplus(D)
+        M = torch.eye(r, device=mu.device) + V.transpose(-1, -2) @ torch.diag_embed(1/D) @ V
 
-        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
-        mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+        logdet = torch.log(D).sum(-1) + torch.logdet(M)
 
-        nll = -(-n*t/2 * math.log(2*math.pi) + mahabolis + n * Vlogdet + t * Ulogdet)
+        # R = Z^T D^-1 V
+        R = torch.einsum("bij , bjk -> bik", (Z / D).unsqueeze(1), V)
 
-        # dist = torch.distributions.MultivariateNormal(
-        #     loc = torch.stack([torch.zeros_like(mu).reshape(b,n*t) for _ in range(r+1)] , 1),
-        #     precision_matrix=util.kron(torch.einsum("brij,brjk->brik", L_s, L_s.transpose(-1, -2)),
-        #                                torch.einsum("brij,brjk->brik", L_t, L_t.transpose(-1, -2)))
+        # mahabolis1  = Z^T D^-1 Z
+        maha1 = (Z/D * Z).sum(1)
+
+        # mahabolis2 = Z^T D^-1 V (I + V^T D^-1 V)^-1 V^T D^-1 Z
+        maha2 = (R @ torch.inverse(M) @ R.transpose(-1, -2)).squeeze()
+
+        mahabolis = maha1 - maha2
+
+        nll = mahabolis + logdet
+        # nll = n*t * math.log(2 * math.pi) + mahabolis + logdet
+
+        # dist = torch.distributions.LowRankMultivariateNormal(
+        #     loc=mu,
+        #     cov_factor=V,
+        #     cov_diag=D,
         # )
-
-        # nll2 = dist.log_prob(R_flatten.reshape(b, r+1, n*t))
-
+        # nll2 = - dist.log_prob(target)
         return nll
 
     def get_output_distribution(self, features, consider_neighbors=False):
@@ -236,7 +242,7 @@ class CholeskyResHead(nn.Module):
         # assert('mu' in features.keys())
         # assert('cov' in features.keys())
         # return features['w'], features['mu'], features['cov']
-        return features['mu'], features['R'], features["L_spatial"], features["L_temporal"]
+        return features['mu'], features['D'], features["V"]
 
 
 class MDN_trainer():
@@ -304,7 +310,7 @@ class MDN_trainer():
 
         import datetime
         # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
-        self.logdir = f'./logs/GWNMDN_residual_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}_nlin{nonlinearity}'
+        self.logdir = f'./logs/GWNMDN_lowrank_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}_nlin{nonlinearity}'
 
         if summary:
             self.summary = SummaryWriter(logdir=f'{self.logdir}')
@@ -358,9 +364,6 @@ class MDN_trainer():
         L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)] = \
             self.act(L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)])
 
-        L_temporal[-1] = torch.eye(n=L_temporal.shape[-1], device=L_temporal.device) * 1
-        L_spatial[-1] = torch.eye(n=L_spatial.shape[-1], device=L_spatial.device) * 0.5
-
         # L_temporal[:, 0, 0] = 1
         # L_temporal = L_temporal / L_temporal[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
 
@@ -380,9 +383,10 @@ class MDN_trainer():
         output = output.reshape(-1, self.num_nodes, self.num_pred, self.num_rank)
 
         mus = output[:, :, :, 0]
-        R = output[:, :, :, 1:]
+        D = output[:, :, :, 1]
+        V = output[:, :, :, 2:]
 
-        L_spatial, L_temporal = self.get_L()
+        # L_spatial, L_temporal = self.get_L()
 
         scaled_real_val = self.scaler.transform(real_val)
 
@@ -395,9 +399,8 @@ class MDN_trainer():
 
         features = {
             'mu': mus,
-            'R': R,
-            'L_spatial': L_spatial,
-            'L_temporal': L_temporal,
+            'D': D,
+            'V': V,
             "rho": self.covariance.rho,
             "target": self.scaler.transform(real),
             "unscaled_target": real,
@@ -538,11 +541,11 @@ class MDN_trainer():
         # sample_prec = dist.component_distribution.precision_matrix[0]
         L_spatial, L_temporal = self.get_L()
 
-        sample_prc_spatial = torch.einsum("bij,bjk->bik", L_spatial, L_spatial.transpose(-1, -2))
-        sample_prc_temporal = torch.einsum("bij,bjk->bik", L_temporal, L_temporal.transpose(-1, -2))
+        sample_cov_spatial = torch.einsum("bij,bjk->bik", L_spatial, L_spatial.transpose(-1, -2))
+        sample_cov_temporal = torch.einsum("bij,bjk->bik", L_temporal, L_temporal.transpose(-1, -2))
 
-        sample_cov_spatial = torch.inverse(sample_prc_spatial)
-        sample_cov_temporal = torch.inverse(sample_prc_temporal)
+        sample_cov_spatial = torch.inverse(sample_cov_spatial)
+        sample_cov_temporal = torch.inverse(sample_cov_temporal)
 
         corr_spatial = torch.zeros_like(sample_cov_spatial)
         for i in range(sample_cov_spatial.size(0)):
@@ -555,28 +558,20 @@ class MDN_trainer():
         # sparsity =V (sample_prec.abs() > 0.01).float()
 
         for i in range(sample_cov_spatial.shape[0]):
-            # sns_plot = sns.heatmap(corr_spatial[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
-            # fig = sns_plot.get_figure()
-            # self.summary.add_figure('spatial_corr_matrix/' + str(i), fig,  self.cnt)
+            sns_plot = sns.heatmap(corr_spatial[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('spatial_corr_matrix/' + str(i), fig,  self.cnt)
 
             sns_plot = sns.heatmap(sample_cov_spatial[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('spatial_cov_matrix/' + str(i), fig,  self.cnt)
 
-            # sns_plot = sns.heatmap(corr_temporal[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
-            # fig = sns_plot.get_figure()
-            # self.summary.add_figure('temporal_corr_matrix/' + str(i), fig,  self.cnt)
+            sns_plot = sns.heatmap(corr_temporal[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('temporal_corr_matrix/' + str(i), fig,  self.cnt)
 
             sns_plot = sns.heatmap(sample_cov_temporal[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('temporal_cov_matrix/' + str(i), fig,  self.cnt)
-
-            sns_plot = sns.heatmap(sample_prc_spatial[i].detach().cpu().numpy(), cmap='coolwarm')
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('spatial_prec_matrix/' + str(i), fig,  self.cnt)
-
-            sns_plot = sns.heatmap(sample_prc_temporal[i].detach().cpu().numpy(), cmap='coolwarm')
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('temporal_prec_matrix/' + str(i), fig,  self.cnt)
 
         self.cnt += 1

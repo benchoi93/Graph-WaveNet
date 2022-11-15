@@ -43,6 +43,7 @@ parser.add_argument("--diag", action="store_true")
 parser.add_argument("--mse_coef", type=float, default=1)
 parser.add_argument("--flow", action="store_true")
 parser.add_argument('--nonlinearity', type=str, default='softplus', choices=["softmax", "softplus", "elu"])
+parser.add_argument('--loss', type=str, default='mse', choices=["mse", "mae"])
 
 args = parser.parse_args()
 
@@ -124,7 +125,7 @@ def main():
                          args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
                          adjinit, n_components=args.n_components, reg_coef=args.reg_coef, consider_neighbors=args.consider_neighbors,
                          outlier_distribution=args.outlier_distribution, pred_len=args.pred_len, rho=args.rho, diag=args.diag,
-                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity)
+                         mse_coef=args.mse_coef, nonlinearity=args.nonlinearity, loss=args.loss)
 
     print("start training...", flush=True)
     his_loss = []
@@ -206,6 +207,10 @@ def main():
         test_crps_loss = []
         test_es_loss = []
 
+        test_mape_list = []
+        test_rmse_list = []
+        test_mae_list = []
+
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
             testx = torch.Tensor(x).to(device)
@@ -223,6 +228,10 @@ def main():
             test_mse_loss.append(metrics['mse_loss'])
             test_crps_loss.append(metrics["crps"])
             test_es_loss.append(metrics["ES"])
+
+            test_mape_list.append(metrics['mape_list'])
+            test_rmse_list.append(metrics['rmse_list'])
+            test_mae_list.append(metrics['mae_list'])
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -249,6 +258,10 @@ def main():
         mtest_reg_loss = np.mean(test_reg_loss)
         mtest_crps_loss = np.mean(test_crps_loss)
         mtest_es_loss = np.mean(test_es_loss)
+
+        mtest_mape_list = np.mean(np.array(test_mape_list), 0)
+        mtest_rmse_list = np.mean(np.array(test_rmse_list), 0)
+        mtest_mae_list = np.mean(np.array(test_mae_list), 0)
 
         his_loss.append(mvalid_loss)
 
@@ -281,6 +294,11 @@ def main():
         engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
         engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
 
+        for j in range(len(args.pred_len)):
+            engine.summary.add_scalar(f'errors_spec/test_mape_{j}', mtest_mape_list[j], i)
+            engine.summary.add_scalar(f'errors_spec/test_rmse_{j}', mtest_rmse_list[j], i)
+            engine.summary.add_scalar(f'errors_spec/test_mae_{j}', mtest_mae_list[j], i)
+
         # engine.summary.add_scalar('loss/rho', torch.sigmoid(engine.covariance.rho).item(), i)
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
@@ -288,8 +306,8 @@ def main():
 
         if i % args.save_every == 0:
             # torch.save(engine.model.state_dict(), args.save+"_epoch_"+str(i)+"_"+str(round(mvalid_loss, 2))+".pth")
-            if best_val_loss > mvalid_crps_loss:
-                best_val_loss = mvalid_crps_loss
+            if best_val_loss > mvalid_mape:
+                best_val_loss = mvalid_mape
                 engine.save(best=True)
                 print("Saved best model")
 

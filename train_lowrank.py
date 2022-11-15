@@ -6,7 +6,7 @@ import util
 import matplotlib.pyplot as plt
 from engine import trainer
 # from mdn_engine import MDN_trainer
-from Fixed_mdn_engine_residual import MDN_trainer
+from Fixed_mdn_engine_lowrank import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
 
 parser = argparse.ArgumentParser()
@@ -21,7 +21,7 @@ parser.add_argument('--aptonly', action='store_true', help='whether only adaptiv
 parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
-parser.add_argument('--num-rank', type=int, default=5, help='')
+parser.add_argument('--num-rank', type=int, default=30, help='')
 parser.add_argument('--nhid', type=int, default=32, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
@@ -61,21 +61,21 @@ def main():
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
 
-    # target_sensors = ['404444',
-    #                   '400582',
-    #                   '400097',
-    #                   '401224',
-    #                   '400828',
-    #                   '400648',
-    #                   '404434',
-    #                   '400222',
-    #                   '400952',
-    #                   '401210',
-    #                   '400507',
-    #                   '400185'
-    #                   ]
+    target_sensors = ['404444',
+                      '400582',
+                      '400097',
+                      '401224',
+                      '400828',
+                      '400648',
+                      '404434',
+                      '400222',
+                      '400952',
+                      '401210',
+                      '400507',
+                      '400185'
+                      ]
 
-    target_sensors = sensor_ids
+    # target_sensors = sensor_ids
 
     target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
     args.num_nodes = len(target_sensors)
@@ -199,9 +199,9 @@ def main():
             valid_crps_loss.append(metrics["crps"])
             valid_es_loss.append(metrics["ES"])
 
-            if i % 10 == 0:
-                if iter == 0:
-                    engine.plot_cov()
+            # if i % 10 == 0:
+            #     if iter == 0:
+            #         engine.plot_cov()
 
         test_loss = []
         test_mape = []

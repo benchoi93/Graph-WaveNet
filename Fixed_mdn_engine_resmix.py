@@ -35,12 +35,12 @@ class FixedResCov(nn.Module):
         self.diag = diag
         self.rho = rho
 
-        mask1 = torch.tril(torch.ones_like(self._L1)).cuda()
-        mask2 = torch.tril(torch.ones_like(self._L2)).cuda()
-        mask2[:, 0, 0] = 0
+        # mask1 = torch.tril(torch.ones_like(self._L1)).cuda()
+        # mask2 = torch.tril(torch.ones_like(self._L2)).cuda()
+        # mask2[:, 0, 0] = 0
 
-        self._L1.register_hook(get_zero_grad_hook(mask1))
-        self._L2.register_hook(get_zero_grad_hook(mask2))
+        # self._L1.register_hook(get_zero_grad_hook(mask1))
+        # self._L2.register_hook(get_zero_grad_hook(mask2))
 
     @property
     def L1(self):
@@ -88,12 +88,13 @@ class CholeskyResHead(nn.Module):
 
         self.training = True
 
-        if loss == "maskedmse":
-            self.loss_fn = util.masked_mse
-            # self.loss_fn = torch.nn.MSELoss(reduction='mean')
-        elif loss == "maskedmae":
-            self.loss_fn = util.masked_mae
-            # self.loss_fn = torch.nn.L1Loss(reduction='mean')
+        self.loss = loss
+        # if loss == "maskedmse":
+        #     self.loss_fn = util.masked_mse
+        #     # self.loss_fn = torch.nn.MSELoss(reduction='mean')
+        # elif loss == "maskedmae":
+        #     self.loss_fn = util.masked_mae
+        #     # self.loss_fn = torch.nn.L1Loss(reduction='mean')
 
     def forward(self, features):
         # input : features = dict of tensors
@@ -122,12 +123,31 @@ class CholeskyResHead(nn.Module):
         # mae_loss = util.masked_mae(features["mu"], target, 0.0)
         # u_target = features["unscaled_target"]
         # predict = features["scaler"].inverse_transform(features["mu"]).reshape(u_target.shape)
-        predict = features["mu"] + features["R"].sum(-1)
-        # predict = features["mu"]
+        # predict = features["mu"] + features["R"].sum(-1)
+        predict = features["mu"]
 
-        target = features["unscaled_target"]
-        predict = features["scaler"].inverse_transform(predict)
-        predict = predict.reshape(target.shape)
+        target = features["target"]
+        unscaled_target = features["unscaled_target"]
+        # predict = features["scaler"].inverse_transform(predict)
+        # predict = predict.reshape(target.shape)
+
+        mask = (unscaled_target != 0)
+        mask = mask.float()
+        mask /= torch.mean((mask))
+        mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
+
+        if self.loss == "mae":
+            mse_loss = torch.abs(predict-target)
+        elif self.loss == "mse":
+            mse_loss = (predict-target) ** 2
+        else:
+            raise NotImplementedError
+
+        mse_loss = mse_loss * mask
+
+        mse_loss = torch.where(torch.isnan(mse_loss), torch.zeros_like(mse_loss), mse_loss)
+
+        mse_loss = torch.mean(mse_loss)
 
         # mse_loss = ((predict - u_target).abs()).mean()
         # mse_loss = util.masked_mse(predict, target, features["scaler"].transform(0.0))
@@ -135,7 +155,8 @@ class CholeskyResHead(nn.Module):
         # mse_loss = self.loss_fn(predict, target, features["scaler"].transform(0.0))
         # mse_loss = ((predict - target)**2).mean()
         # mse_loss = ((features["mu"] - target).abs()).mean()
-        mse_loss = util.masked_mae(predict, target, 0.0)
+        # mse_loss = util.masked_mae(predict, target, 0.0)
+        # mse_loss = ((predict - target).abs()).mean()
 
         loss = self.rho * nll_loss + reg_loss * self.reg_coef + self.mse_coef * mse_loss
         # loss = mse_loss
@@ -148,12 +169,41 @@ class CholeskyResHead(nn.Module):
         logw = w.log().squeeze(-1)
 
         b, n, t, r = R.shape
+        n = self.n_vars
+        t = len(self.pred_len)
+
+        # R_ext = torch.concat([R, (target - mu - R.sum(-1)).unsqueeze(-1)], dim=-1)
+        # R_flatten = R_ext.permute(0, 3, 1, 2)
+
+        R_ext = target - mu
+        R_flatten = R_ext.unsqueeze(1).repeat(1, r+1, 1, 1)
+
+        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
+        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
+
+        Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1)
+        Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1)
+
+        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+
+        nll = -n*t/2 * math.log(2*math.pi) + mahabolis + n * Vlogdet + t * Ulogdet + logw
+
+        nll = - torch.logsumexp(nll, dim=1)
+
+        return nll
+
+    def get_nll2(self, features, target):
+        mu, R, L_s, L_t = self.get_parameters(features)
+        w = features["w"]
+        logw = w.log().squeeze(-1)
+
+        b, n, t, r = R.shape
 
         # mu = mu.reshape(target.shape)
 
         R_ext = torch.concat([R, (target - mu - R.sum(-1)).unsqueeze(-1)], dim=-1)
         R_flatten = R_ext.permute(0, 3, 1, 2)
-        # R_flatten = R_ext.reshape(b, r+1, n*t).reshape(b, r+1, n, t)
 
         Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
         Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1) * 2
@@ -164,8 +214,8 @@ class CholeskyResHead(nn.Module):
         # prc_s = cov_s.inverse()
         # L_prc_s = torch.linalg.cholesky(prc_s)
         # L_s_inv = L_s.inverse()
-        L_s_inv = torch.inverse(L_s)
-        L_t_inv = torch.inverse(L_t)
+        L_s_inv = L_s.inverse()
+        L_t_inv = L_t.inverse()
 
         # Q_t = torch.einsum("rij,brjk,rkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
         Q_t = torch.einsum("rij,brjk,rkl->bril", L_s_inv, R_flatten, L_t_inv.transpose(-1, -2))
@@ -175,13 +225,13 @@ class CholeskyResHead(nn.Module):
 
         nll = -(-n*t/2 * math.log(2*math.pi) + mahabolis + detinvcov)
 
-        # U = torch.einsum("bij, bjk-> bik", L_s, L_s.transpose(-1, -2))
-        # V = torch.einsum("bij, bjk-> bik", L_t, L_t.transpose(-1, -2))
+        U = torch.einsum("bij, bjk-> bik", L_s, L_s.transpose(-1, -2))
+        V = torch.einsum("bij, bjk-> bik", L_t, L_t.transpose(-1, -2))
 
-        # cov = util.kron(U, V)
-        # cov = (w).unsqueeze(-1) * cov.unsqueeze(0)
-        # cov = cov.reshape(-1, 5, 144, 144)
-        # prc = torch.inverse(cov)
+        cov = util.kron(U, V)
+        cov = (w).unsqueeze(-1) * cov.unsqueeze(0)
+        cov = cov.reshape(-1, 5, 144, 144)
+        prc = torch.inverse(cov)
         # Rtemp = R_flatten.reshape(-1, 5, 144)
 
         # mahabolis2 = torch.stack([torch.einsum("bij,bjk,bkl->bil", Rtemp[:, i, :].unsqueeze(1),
@@ -191,6 +241,13 @@ class CholeskyResHead(nn.Module):
         # detinvcov2 = torch.logdet(cov)*0.5
         # nll2 = torch.stack([Dist.MultivariateNormal(loc=torch.zeros(64, 144, device=prc.device),
         #                    covariance_matrix=cov[:, i, :, :]).log_prob(Rtemp[:, i, :]) for i in range(5)], 1)
+
+        nll3 = Dist.MultivariateNormal(
+            loc=torch.zeros(64, 144, device=prc.device),
+            covariance_matrix=cov.sum(1)
+        ).log_prob((target - mu).reshape(-1, 144))
+
+        res = target - mu
 
         return nll.sum(-1)
 
@@ -257,7 +314,7 @@ class CholeskyResHead(nn.Module):
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
                  mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1, nonlinearity="softplus",
-                 loss="maskedmse"):
+                 loss="maskedmse", summary=True):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -296,10 +353,8 @@ class MDN_trainer():
         self.fc_w = nn.Sequential(
             nn.Linear(self.num_nodes * self.num_pred, nhid),
             nn.ReLU(),
-            nn.Dropout(dropout),
             nn.Linear(nhid, nhid),
             nn.ReLU(),
-            nn.Dropout(dropout),
             nn.Linear(nhid, 1)
         )
 
@@ -324,7 +379,8 @@ class MDN_trainer():
         # self.logdir = f'./logs/GWN_MDN_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_nei{consider_neighbors}'
         self.logdir = f'./logs/GWNMDN_ResMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_reg{reg_coef}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}_msecoef{mse_coef}_nlin{nonlinearity}'
 
-        self.summary = SummaryWriter(logdir=f'{self.logdir}')
+        if summary:
+            self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
         self.log_softmax = nn.LogSoftmax(dim=-1)
         # self.softmax = nn.Softmax(dim=-1)
@@ -374,8 +430,8 @@ class MDN_trainer():
         L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)] = \
             self.act(L_temporal[:, torch.arange(self.num_pred), torch.arange(self.num_pred)])
 
-        L_temporal[:, 0, 0] = 1
-        L_spatial[:, 0, 0] = 1
+        # L_temporal[:, 0, 0] = 1
+        # L_spatial[:, 0, 0] = 1
         # L_temporal = L_temporal / L_temporal[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
         # L_spatial = L_spatial / L_spatial[:, 0, 0].unsqueeze(-1).unsqueeze(-1)
 
@@ -395,7 +451,7 @@ class MDN_trainer():
         output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.num_rank)
         fc_in = output.permute(0, 3, 2, 1).reshape(-1, self.num_rank, self.num_nodes * self.num_pred)
         w = self.fc_w(fc_in)
-        w = nn.Softplus()(w)
+        w = torch.softmax(w, dim=1)
 
         mus = output[:, :, :, 0]
         R = output[:, :, :, 1:]
@@ -446,6 +502,10 @@ class MDN_trainer():
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
 
+        mape_list = [util.masked_mape(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
+        rmse_list = [util.masked_rmse(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
+        mae_list = [util.masked_mae(predict[:, :, i], real[:, :, i], 0.0).item() for i in range(self.num_pred)]
+
         # crps = self.specific_eval(features={'w': w, 'mu': mus, 'scale_tril': L, "rho": self.covariance.rho, 'target': scaled_real_val})
 
         features["loss"] = loss.item()
@@ -456,14 +516,9 @@ class MDN_trainer():
         features["rmse"] = rmse
         features["target"] = self.scaler.transform(real)
         # # "cov": cov_new,
-        # "loss": loss.item(),
-        # "mape": mape,
-        # "rmse": rmse,
-        # "nll_loss": nll_loss,
-        # "reg_loss": reg_loss,
-        # "mse_loss": mse_loss,
-        # # "crps": crps
-        # "target": self.scaler.transform(real)
+        features["mape_list"] = mape_list
+        features["rmse_list"] = rmse_list
+        features["mae_list"] = mae_list
 
         return features
 
@@ -558,11 +613,11 @@ class MDN_trainer():
         # sample_prec = dist.component_distribution.precision_matrix[0]
         L_spatial, L_temporal = self.get_L()
 
-        sample_cov_spatial = torch.einsum("bij,bjk->bik", L_spatial, L_spatial.transpose(-1, -2))
-        sample_cov_temporal = torch.einsum("bij,bjk->bik", L_temporal, L_temporal.transpose(-1, -2))
+        sample_prc_spatial = torch.einsum("bij,bjk->bik", L_spatial, L_spatial.transpose(-1, -2))
+        sample_prc_temporal = torch.einsum("bij,bjk->bik", L_temporal, L_temporal.transpose(-1, -2))
 
-        # sample_cov_spatial = torch.inverse(sample_cov_spatial)
-        # sample_cov_temporal = torch.inverse(sample_cov_temporal)
+        sample_cov_spatial = torch.inverse(sample_prc_spatial)
+        sample_cov_temporal = torch.inverse(sample_prc_temporal)
 
         corr_spatial = torch.zeros_like(sample_cov_spatial)
         for i in range(sample_cov_spatial.size(0)):
@@ -571,6 +626,14 @@ class MDN_trainer():
         corr_temporal = torch.zeros_like(sample_cov_temporal)
         for i in range(sample_cov_spatial.size(0)):
             corr_temporal[i] = torch.corrcoef(sample_cov_temporal[i])
+
+        corr_prc_spoatial = torch.zeros_like(sample_prc_spatial)
+        for i in range(sample_prc_spatial.size(0)):
+            corr_prc_spoatial[i] = torch.corrcoef(sample_prc_spatial[i])
+
+        corr_prc_temporal = torch.zeros_like(sample_prc_temporal)
+        for i in range(sample_prc_temporal.size(0)):
+            corr_prc_temporal[i] = torch.corrcoef(sample_prc_temporal[i])
 
         # sparsity =V (sample_prec.abs() > 0.01).float()
 
@@ -590,5 +653,21 @@ class MDN_trainer():
             sns_plot = sns.heatmap(sample_cov_temporal[i].detach().cpu().numpy(), cmap='coolwarm')
             fig = sns_plot.get_figure()
             self.summary.add_figure('temporal_cov_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(sample_prc_spatial[i].detach().cpu().numpy(), cmap='coolwarm')
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('spatial_prc_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(sample_prc_temporal[i].detach().cpu().numpy(), cmap='coolwarm')
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('temporal_prc_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(corr_prc_spoatial[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('spatial_prc_corr_matrix/' + str(i), fig,  self.cnt)
+
+            sns_plot = sns.heatmap(corr_prc_temporal[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
+            fig = sns_plot.get_figure()
+            self.summary.add_figure('temporal_prc_corr_matrix/' + str(i), fig,  self.cnt)
 
         self.cnt += 1
