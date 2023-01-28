@@ -4,6 +4,55 @@ import os
 import scipy.sparse as sp
 import torch
 from scipy.sparse import linalg
+import matplotlib
+import matplotlib.pyplot as plt
+
+
+def universal_fig(figsize=(3, 3), fontsize=12, axislinewidth=1, markersize=5, text=None, limits=[-7, 7], offset=[-44, 12], projection=None, fontfamily=["Helvetica", "Arial"], contain_latex=False):
+    '''
+    Create universal figure settings with publication quality
+    returen fig, ax (similar to plt.plot)
+    fig, ax = universal_fig()
+    '''
+    # ----------------------------------------------------------------
+    if projection is None:
+        fig, ax = plt.subplots(frameon=False)
+    else:
+        fig, ax = plt.subplots(frameon=False, subplot_kw=dict(projection=projection))
+    fig.set_size_inches(figsize)
+    matplotlib.rc("font", **{"family": "sans-serif", "sans-serif": fontfamily, "size": fontsize})
+    matplotlib.rc('pdf', fonttype=42, use14corefonts=True, compression=6)
+    matplotlib.rc('ps', useafm=True, usedistiller='none', fonttype=42)
+    matplotlib.rc("axes", unicode_minus=False, linewidth=axislinewidth, labelsize='medium')
+    matplotlib.rc("axes.formatter", limits=limits)
+    matplotlib.rc('savefig', bbox='tight', format='eps', frameon=False, pad_inches=0.05)
+    matplotlib.rc('legend')
+    matplotlib.rc('lines', marker=None, markersize=markersize)
+    matplotlib.rc('text', usetex=False)
+    matplotlib.rc('xtick', direction='in')
+    matplotlib.rc('xtick.major', size=4)
+    matplotlib.rc('xtick.minor', size=2)
+    matplotlib.rc('ytick', direction='in')
+    matplotlib.rc('lines', linewidth=1)
+    matplotlib.rc('ytick.major', size=4)
+    matplotlib.rc('ytick.minor', size=2)
+    matplotlib.rcParams['lines.solid_capstyle'] = 'butt'
+    matplotlib.rcParams['lines.solid_joinstyle'] = 'bevel'
+    matplotlib.rc('mathtext', fontset='stixsans')
+
+    if contain_latex:
+        matplotlib.rc('ps', useafm=False, usedistiller='none', fonttype=3)
+        matplotlib.rc('pdf', fonttype=3, use14corefonts=True, compression=6)
+
+    matplotlib.rc('legend', fontsize='medium', frameon=False,
+                  handleheight=0.5, handlelength=1, handletextpad=0.4, numpoints=1)
+    if text is not None:
+        w = ax.annotate(text, xy=(0, 1), xycoords='axes fraction', fontsize='large', weight='bold',
+                        xytext=(offset[0]/12*fontsize, offset[1]/12*fontsize), textcoords='offset points', ha='left', va='top')
+        print(w.get_fontname())
+    # ----------------------------------------------------------------
+    # end universal settings
+    return fig, ax
 
 
 class DataLoader(object):

@@ -34,7 +34,13 @@ python generate_training_data.py --output_dir=data/PEMS-BAY --traffic_df_filenam
 ## Train Commands
 
 ```
+# original Graph Wavenet
 python train.py --gcn_bool --adjtype doubletransition --addaptadj  --randomadj
+# or
+python train_new.py --gcn_bool --adjtype doubletransition --addaptadj  --randomadj --n_components 1 --rho 0 --diag
+
+# with proposed method (K=3)
+python train_new.py --gcn_bool --adjtype doubletransition --addaptadj  --randomadj --n_components 3 --rho 0.001
 ```
 
 

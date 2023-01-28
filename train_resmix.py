@@ -11,8 +11,12 @@ from Fixed_mdn_engine_resmix import MDN_trainer
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
+
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+# parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
+# parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
+
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -20,7 +24,7 @@ parser.add_argument('--addaptadj', action='store_true', help='whether add adapti
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
-parser.add_argument('--nhid', type=int, default=16, help='')
+parser.add_argument('--nhid', type=int, default=32, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')

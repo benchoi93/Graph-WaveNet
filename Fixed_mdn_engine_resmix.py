@@ -19,7 +19,7 @@ def get_zero_grad_hook(mask):
 
 
 class FixedResCov(nn.Module):
-    def __init__(self, n_components, n_vars, num_pred, rho=0.5, diag=False, trainL=True, device='cpu'):
+    def __init__(self, n_components, n_vars, num_pred, rho=0.5, diag=False, trainL=True, device='cpu', adj_bool=None):
         super(FixedResCov, self).__init__()
         self.dim_L_1 = (n_components, n_vars, n_vars)
         self.dim_L_2 = (n_components, num_pred, num_pred)
@@ -314,7 +314,7 @@ class CholeskyResHead(nn.Module):
 class MDN_trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components, reg_coef,
                  mode="cholesky", time_varying=False, consider_neighbors=False, outlier_distribution=True, pred_len=12, rho=0.5, diag=False, mse_coef=0.1, nonlinearity="softplus",
-                 loss="maskedmse", summary=True):
+                 loss="maskedmse", summary=True, adj_bool=None):
 
         self.num_nodes = num_nodes
         self.n_components = n_components
@@ -328,6 +328,8 @@ class MDN_trainer():
         self.dim_V = n_components * num_nodes * num_rank
         self.dim_D = n_components * num_nodes
         self.pred_len = pred_len
+
+        adj_bool = adj_bool
 
         # dim_out = self.dim_w + self.dim_mu + self.dim_V + self.dim_D
         # self.out_per_comp = 2
@@ -348,7 +350,7 @@ class MDN_trainer():
                                         consider_neighbors=consider_neighbors, outlier_distribution=outlier_distribution,
                                         mse_coef=mse_coef, rho=rho, loss=loss)
 
-        self.covariance = FixedResCov(num_rank, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0)
+        self.covariance = FixedResCov(num_rank, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0, adj_bool=adj_bool)
 
         self.fc_w = nn.Sequential(
             nn.Linear(self.num_nodes * self.num_pred, nhid),
