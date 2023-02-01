@@ -42,12 +42,11 @@ parser.add_argument('--mix_mean', type=str, default="False", choices=["True", "F
 
 args = parser.parse_args()
 args.mix_mean = True if args.mix_mean == "True" else False
-wandb.init(project="GWN", config=args, name=f"GWN_N{args.n_components}_rho{args.rho}_H{args.nhid}_mix{args.mix_mean}")
+wandb.init(project="GWN", config=args)
 
 args.pred_len = list(range(12))
 
 torch.backends.cudnn.benchmark = True
-
 
 def main():
     # set seed

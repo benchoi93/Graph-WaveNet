@@ -1,4 +1,11 @@
 program: train_new.py # the program to run
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--gcn_bool"
+  - "--addaptadj"
+  - "--randomadj"
 method: grid # among bayes, grid, random
 metric:
   name: errors/test_mape # need to log this metric in your code
