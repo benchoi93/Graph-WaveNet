@@ -1,3 +1,5 @@
+import time
+
 import torch.optim as optim
 from model import *
 import util
@@ -117,7 +119,7 @@ class CholeskyResHead(nn.Module):
         n = self.n_vars
         t = len(self.pred_len)
 
-        R_ext = (mu - target.unsqueeze(-1)) * mask.unsqueeze(-1)
+        R_ext = (mu - target.unsqueeze(-1))
         R_flatten = R_ext.permute(0, 3, 1, 2)
 
         L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
@@ -182,7 +184,7 @@ class MDN_trainer():
         # self.out_per_comp = 2
         self.num_pred = len(self.pred_len) if isinstance(self.pred_len, list) else 1
 
-        self.out_per_comp = self.n_components * self.num_pred * 2
+        self.out_per_comp = self.n_components * self.num_pred
 
         self.model = gwnet(device, self.num_nodes, args.dropout, supports=supports, gcn_bool=args.gcn_bool, addaptadj=args.addaptadj, aptinit=aptinit,
                            in_dim=args.in_dim, out_dim=self.out_per_comp, residual_channels=self.nhid, dilation_channels=self.nhid, skip_channels=self.nhid * 8, end_channels=self.nhid * 16)
@@ -216,7 +218,7 @@ class MDN_trainer():
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_DynMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{self.loss}loss_N{self.n_components}_nhid{self.nhid}_pred{self.num_pred}_rho{self.rho}_diag{self.diag}'
+        self.logdir = f'./logs/GWN_DynMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{self.loss}loss_N{self.n_components}_nhid{self.nhid}_pred{self.num_pred}_rho{self.rho}_diag{self.diag}_mixmean{self.mix_mean}'
 
         import os
         # create logdir
@@ -254,25 +256,28 @@ class MDN_trainer():
         if not eval:
             self.model_list.train()
 
+        now = time.time()
         input = nn.functional.pad(input, (1, 0, 0, 0))
         output = self.model(input)
         output = output.transpose(1, 3)
+        output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.n_components)
+        print(f"{time.time() - now:.5f}")
+        now = time.time()
 
-        output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.n_components*2)
-
-        mus = output[:, :, :, :self.n_components]
+        mus = output.clone()
         if not self.mix_mean:
-            mus[..., :] = mus[..., 0].unsqueeze(-1)
+            mus = mus[..., 0].unsqueeze(-1)
 
-        R = output[:, :, :, self.n_components:]
+        R = output
         fc_in = R.permute(0, 3, 2, 1).reshape(-1, self.n_components, self.num_nodes * self.num_pred)
-        w = self.fc_w(fc_in)[:, :self.n_components, :]
+        w = self.fc_w(fc_in)
         w = torch.log_softmax(w, dim=1)
 
         L_spatial, L_temporal = self.get_L()
 
         scaled_real_val = self.scaler.transform(real_val)
-
+        print(f"{time.time() - now:.5f}")
+        now = time.time()
         if not eval:
             # avoid learning high variance/covariance from missing values
             mask = real_val[:, :, self.pred_len] == 0
@@ -294,6 +299,8 @@ class MDN_trainer():
         loss, nll_loss, mse_loss = self.res_head.forward(
             features=features
         )
+        print(f"{time.time() - now:.5f}")
+        now = time.time()
 
         if not eval:
             self.optimizer.zero_grad()
@@ -302,6 +309,8 @@ class MDN_trainer():
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
 
             self.optimizer.step()
+        print(f"{time.time() - now:.5f}")
+        now = time.time()
 
         output = ((mus * w.exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)).reshape(real_val.shape[0], self.num_nodes, self.num_pred)
         predict = self.scaler.inverse_transform(output)

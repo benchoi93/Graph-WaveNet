@@ -13,6 +13,7 @@ parser.add_argument('--device', type=str, default='cuda:0', help='')
 
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
 parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
@@ -22,7 +23,7 @@ parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--nhid', type=int, default=32, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+parser.add_argument('--batch_size', type=int, default=128, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
@@ -41,10 +42,11 @@ parser.add_argument('--mix_mean', type=str, default="False", choices=["True", "F
 
 args = parser.parse_args()
 args.mix_mean = True if args.mix_mean == "True" else False
-wandb.init(project="GWN", config=args)
-
+wandb.init(project="GWN", config=args, name=f"GWN_N{args.n_components}_rho{args.rho}_H{args.nhid}_mix{args.mix_mean}")
 
 args.pred_len = list(range(12))
+
+torch.backends.cudnn.benchmark = True
 
 
 def main():
@@ -90,11 +92,11 @@ def main():
         train_mse_loss = []
         train_nll_loss = []
         t1 = time.time()
-        dataloader['train_loader'].shuffle()
-        for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
-            trainx = torch.Tensor(x).to(device)
+        dataloader['train_loader']
+        for iter, (x, y) in enumerate(dataloader['train_loader']):
+            trainx = x.to(device)
             trainx = trainx.transpose(1, 3)
-            trainy = torch.Tensor(y).to(device)
+            trainy = y.to(device)
             trainy = trainy.transpose(1, 3)
             metrics = engine.train(trainx, trainy[:, 0, :, :])
             train_loss.append(metrics['loss'])
@@ -116,10 +118,10 @@ def main():
         valid_mse_loss = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
-            testx = torch.Tensor(x).to(device)
+        for iter, (x, y) in enumerate(dataloader['val_loader']):
+            testx = x.to(device)
             testx = testx.transpose(1, 3)
-            testy = torch.Tensor(y).to(device)
+            testy = y.to(device)
             testy = testy.transpose(1, 3)
 
             metrics = engine.eval(testx, testy[:, 0, :, :])
@@ -145,10 +147,10 @@ def main():
         test_mae_list = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
-            testx = torch.Tensor(x).to(device)
+        for iter, (x, y) in enumerate(dataloader['test_loader']):
+            testx = x.to(device)
             testx = testx.transpose(1, 3)
-            testy = torch.Tensor(y).to(device)
+            testy = y.to(device)
             testy = testy.transpose(1, 3)
 
             metrics = engine.eval(testx, testy[:, 0, :, :])
@@ -267,10 +269,10 @@ def main():
     # test_mse_loss = []
 
     s1 = time.time()
-    for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
-        testx = torch.Tensor(x).to(device)
+    for iter, (x, y) in enumerate(dataloader['test_loader']):
+        testx = x.to(device)
         testx = testx.transpose(1, 3)
-        testy = torch.Tensor(y).to(device)
+        testy = y.to(device)
         testy = testy.transpose(1, 3)
 
         metrics = engine.eval(testx, testy[:, 0, :, :])
