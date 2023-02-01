@@ -168,3 +168,4 @@ logs*/
 *.log
 *.out
 fig/
+wandb/
