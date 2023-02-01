@@ -256,13 +256,10 @@ class MDN_trainer():
         if not eval:
             self.model_list.train()
 
-        now = time.time()
         input = nn.functional.pad(input, (1, 0, 0, 0))
         output = self.model(input)
         output = output.transpose(1, 3)
         output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.n_components)
-        print(f"{time.time() - now:.5f}")
-        now = time.time()
 
         mus = output.clone()
         if not self.mix_mean:
@@ -276,8 +273,6 @@ class MDN_trainer():
         L_spatial, L_temporal = self.get_L()
 
         scaled_real_val = self.scaler.transform(real_val)
-        print(f"{time.time() - now:.5f}")
-        now = time.time()
         if not eval:
             # avoid learning high variance/covariance from missing values
             mask = real_val[:, :, self.pred_len] == 0
@@ -299,8 +294,6 @@ class MDN_trainer():
         loss, nll_loss, mse_loss = self.res_head.forward(
             features=features
         )
-        print(f"{time.time() - now:.5f}")
-        now = time.time()
 
         if not eval:
             self.optimizer.zero_grad()
@@ -309,8 +302,6 @@ class MDN_trainer():
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
 
             self.optimizer.step()
-        print(f"{time.time() - now:.5f}")
-        now = time.time()
 
         output = ((mus * w.exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)).reshape(real_val.shape[0], self.num_nodes, self.num_pred)
         predict = self.scaler.inverse_transform(output)

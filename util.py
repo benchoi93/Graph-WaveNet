@@ -231,9 +231,9 @@ def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size
     val_dataset = TensorDataset(torch.from_numpy(data['x_val']).float(), torch.from_numpy(data['y_val']).float())
     test_dataset = TensorDataset(torch.from_numpy(data['x_test']).float(), torch.from_numpy(data['y_test']).float())
 
-    data['train_loader'] = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    data['val_loader'] = DataLoader(val_dataset, batch_size=valid_batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    data['test_loader'] = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    data['train_loader'] = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,  pin_memory=True)
+    data['val_loader'] = DataLoader(val_dataset, batch_size=valid_batch_size, shuffle=False, pin_memory=True)
+    data['test_loader'] = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False,  pin_memory=True)
 
     # data['train_loader'] = DataLoader(data['x_train'], data['y_train'], batch_size)
     # data['val_loader'] = DataLoader(data['x_val'], data['y_val'], valid_batch_size)
