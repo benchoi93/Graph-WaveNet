@@ -1,0 +1,19 @@
+program: train_new.py # the program to run
+method: grid # among bayes, grid, random
+metric:
+  name: errors/test_mape # need to log this metric in your code
+  goal: minimize # among minimize, maximize
+parameters:
+  n_components:
+    values: [1,3,5,10]
+  mix_mean:
+    values: ["True", "False"]
+  nhid:
+    values: [64,32]
+  rho:
+    values: [0.001]
+  
+  # learning_rate:
+  #   values: [0.001]
+  # nhid:
+  #   values: [32,64]

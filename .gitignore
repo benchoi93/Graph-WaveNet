@@ -170,3 +170,4 @@ logs*/
 fig/
 
 *.png
+wandb/

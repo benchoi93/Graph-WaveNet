@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.distributions as Dist
 
 from tensorboardX import SummaryWriter
+import wandb
 
 
 def get_zero_grad_hook(mask):
@@ -16,7 +17,7 @@ def get_zero_grad_hook(mask):
 
 
 class FixedResCov(nn.Module):
-    def __init__(self, n_components, n_vars, num_pred, rho=0.5, diag=False, trainL=True, device='cpu', adj_bool=None):
+    def __init__(self, n_components, n_vars, num_pred, rho=0.5, diag=False, trainL=True, device='cpu'):
         super(FixedResCov, self).__init__()
         self.dim_L_1 = (n_components, n_vars, n_vars)
         self.dim_L_2 = (n_components, num_pred, num_pred)
@@ -52,11 +53,10 @@ class FixedResCov(nn.Module):
 
 
 class CholeskyResHead(nn.Module):
-    def __init__(self, n_components, n_vars, n_rank, pred_len=12, rho=0.1, loss="mse"):
+    def __init__(self, n_vars, n_components, pred_len=12, rho=0.1, loss="mse"):
         super(CholeskyResHead, self).__init__()
-        self.n_components = n_components
         self.n_vars = n_vars
-        self.n_rank = n_rank
+        self.n_rank = n_components
         self.pred_len = pred_len
 
         self.rho = rho
@@ -66,9 +66,23 @@ class CholeskyResHead(nn.Module):
 
     def forward(self, features):
         target = features['target']
-        nll_loss = self.get_nll(features, target).mean()
 
-        predict = features["mu"]
+        unscaled_target = features["unscaled_target"]
+
+        mask = (unscaled_target != 0)
+        mask = mask.float()
+        mask /= torch.mean((mask))
+        mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
+
+        # initialize nll_loss and mse_loss as torch tensor
+        nll_loss = torch.tensor(10000)
+        mse_loss = torch.tensor(100)
+
+        if not self.rho == 0:
+            nll_loss = self.get_nll(features, target, mask).mean()
+
+       # if not self.rho == 1:
+        predict = (features["mu"] * features['w'].exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)
 
         target = features["target"]
         unscaled_target = features["unscaled_target"]
@@ -91,20 +105,20 @@ class CholeskyResHead(nn.Module):
 
         mse_loss = torch.mean(mse_loss)
 
-        loss = self.rho * nll_loss + mse_loss
+        loss = self.rho * nll_loss + (1-self.rho) * mse_loss
         return loss, nll_loss.item(), mse_loss.item()
 
-    def get_nll(self, features, target):
-        mu, R, L_s, L_t = self.get_parameters(features)
-        w = features["w"]
-        logw = w.log().squeeze(-1)
+    def get_nll(self, features, target, mask):
+        mu, L_s, L_t = self.get_parameters(features)
+        # w = features["w"]
+        logw = features["w"].squeeze(-1)
 
-        b, n, t, r = R.shape
+        b, n, t, r = mu.shape
         n = self.n_vars
         t = len(self.pred_len)
 
-        R_ext = target - mu
-        R_flatten = R_ext.unsqueeze(1).repeat(1, r+1, 1, 1)
+        R_ext = (mu - target.unsqueeze(-1)) * mask.unsqueeze(-1)
+        R_flatten = R_ext.permute(0, 3, 1, 2)
 
         L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
         L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
@@ -118,7 +132,7 @@ class CholeskyResHead(nn.Module):
         nll = -n*t/2 * math.log(2*math.pi) + mahabolis + n * Vlogdet + t * Ulogdet + logw
 
         nll = - torch.logsumexp(nll, dim=1)
-
+        # print(f"maxnll {nll.max():.5f} minnll {nll.min():.5f}")
         return nll
 
     def sample(self, features, nsample=None):
@@ -145,49 +159,45 @@ class CholeskyResHead(nn.Module):
         # torch.einsum("ln,nt,tk->lk", U[0],samples[0,0],V[0])
 
     def get_parameters(self, features):
-        return features['mu'], features['R'], features["L_spatial"], features["L_temporal"]
+        return features['mu'], features["L_spatial"], features["L_temporal"]
 
 
 class MDN_trainer():
-    def __init__(self, scaler, in_dim, seq_length, num_nodes, num_rank, nhid, dropout, lrate, wdecay, device, supports, gcn_bool, addaptadj, aptinit, n_components,                  mode="cholesky", time_varying=False, pred_len=list(range(12)), rho=0.5, diag=False,
-                 loss="maskedmse", summary=True, adj_bool=None):
+    def __init__(self, scaler, args, device, supports, aptinit, summary=True):
 
-        self.num_nodes = num_nodes
-        self.n_components = n_components
-        self.num_rank = num_rank
+        self.args = args
+
+        self.num_nodes = args.num_nodes
+        self.n_components = args.n_components
+        self.nhid = args.nhid
+        self.pred_len = args.pred_len
+        self.diag = args.diag
+        self.rho = args.rho
+        self.loss = args.loss
+        self.scaler = scaler
+        self.mix_mean = args.mix_mean
 
         self.device = device
-        self.diag = diag
-
-        self.dim_w = n_components
-        self.dim_mu = n_components * num_nodes
-        self.pred_len = pred_len
-
-        adj_bool = adj_bool
 
         # self.out_per_comp = 2
-        self.mode = mode
-        self.time_varying = time_varying
         self.num_pred = len(self.pred_len) if isinstance(self.pred_len, list) else 1
 
-        self.out_per_comp = num_rank * self.num_pred
+        self.out_per_comp = self.n_components * self.num_pred * 2
 
-        # self.out_per_comp = num_rank + 1
-        dim_out = n_components * self.out_per_comp
+        self.model = gwnet(device, self.num_nodes, args.dropout, supports=supports, gcn_bool=args.gcn_bool, addaptadj=args.addaptadj, aptinit=aptinit,
+                           in_dim=args.in_dim, out_dim=self.out_per_comp, residual_channels=self.nhid, dilation_channels=self.nhid, skip_channels=self.nhid * 8, end_channels=self.nhid * 16)
 
-        self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
-                           in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
+        self.res_head = CholeskyResHead(self.num_nodes, self.n_components, pred_len=self.pred_len, rho=self.rho, loss=self.loss)
 
-        self.res_head = CholeskyResHead(n_components, num_nodes, num_rank, pred_len=pred_len, rho=rho, loss=loss)
-
-        self.covariance = FixedResCov(num_rank, num_nodes, self.num_pred, rho=rho, diag=diag, trainL=rho != 0, adj_bool=adj_bool)
+        self.covariance = FixedResCov(self.n_components, self.num_nodes, self.num_pred, rho=self.rho,
+                                      diag=self.diag, trainL=self.rho != 0)
 
         self.fc_w = nn.Sequential(
-            nn.Linear(self.num_nodes * self.num_pred, nhid),
+            nn.Linear(self.num_nodes * self.num_pred, self.nhid),
             nn.ReLU(),
-            nn.Linear(nhid, nhid),
+            nn.Linear(self.nhid, self.nhid),
             nn.ReLU(),
-            nn.Linear(nhid, 1)
+            nn.Linear(self.nhid, 1)
         )
 
         self.model_list = nn.ModuleDict(
@@ -200,12 +210,18 @@ class MDN_trainer():
         )
         self.model_list.to(device)
 
-        self.optimizer = optim.Adam(self.model_list.parameters(), lr=lrate, weight_decay=wdecay)
-        self.scaler = scaler
+        wandb.watch(self.model_list)
+        # torch.autograd.set_detect_anomaly(True)
+        self.optimizer = optim.Adam(self.model_list.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
         self.clip = 5
 
         import datetime
-        self.logdir = f'./logs/GWN_DynMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{loss}loss_N{n_components}_R{num_rank}_nhid{nhid}_pred{self.num_pred}_rho{rho}_diag{diag}'
+        self.logdir = f'./logs/GWN_DynMix_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}{self.loss}loss_N{self.n_components}_nhid{self.nhid}_pred{self.num_pred}_rho{self.rho}_diag{self.diag}'
+
+        import os
+        # create logdir
+        if not os.path.exists(self.logdir):
+            os.makedirs(self.logdir)
 
         if summary:
             self.summary = SummaryWriter(logdir=f'{self.logdir}')
@@ -242,13 +258,16 @@ class MDN_trainer():
         output = self.model(input)
         output = output.transpose(1, 3)
 
-        output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.num_rank)
-        fc_in = output.permute(0, 3, 2, 1).reshape(-1, self.num_rank, self.num_nodes * self.num_pred)
-        w = self.fc_w(fc_in)
-        w = torch.softmax(w, dim=1)
+        output = output.reshape(output.shape[0], self.num_nodes, self.num_pred, self.n_components*2)
 
-        mus = output[:, :, :, 0]
-        R = output[:, :, :, 1:]
+        mus = output[:, :, :, :self.n_components]
+        if not self.mix_mean:
+            mus[..., :] = mus[..., 0].unsqueeze(-1)
+
+        R = output[:, :, :, self.n_components:]
+        fc_in = R.permute(0, 3, 2, 1).reshape(-1, self.n_components, self.num_nodes * self.num_pred)
+        w = self.fc_w(fc_in)[:, :self.n_components, :]
+        w = torch.log_softmax(w, dim=1)
 
         L_spatial, L_temporal = self.get_L()
 
@@ -257,14 +276,13 @@ class MDN_trainer():
         if not eval:
             # avoid learning high variance/covariance from missing values
             mask = real_val[:, :, self.pred_len] == 0
-            mus = mus * ~(mask) + scaled_real_val[:, :, self.pred_len] * mask
+            mus = mus * ~(mask.unsqueeze(-1)) + (scaled_real_val[:, :, self.pred_len] * mask).unsqueeze(-1)
 
         real = real_val[:, :, self.pred_len]
 
         features = {
             'mu': mus,
             'w': w,
-            'R': R,
             'L_spatial': L_spatial,
             'L_temporal': L_temporal,
             "rho": self.covariance.rho,
@@ -282,9 +300,10 @@ class MDN_trainer():
             loss.backward()
             if self.clip is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+
             self.optimizer.step()
 
-        output = mus.reshape(real_val.shape[0], self.num_nodes, self.num_pred)
+        output = ((mus * w.exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)).reshape(real_val.shape[0], self.num_nodes, self.num_pred)
         predict = self.scaler.inverse_transform(output)
         predict[predict < 0] = 0
         mape = util.masked_mape(predict, real, 0.0).item()
@@ -303,6 +322,21 @@ class MDN_trainer():
         features["mape_list"] = mape_list
         features["rmse_list"] = rmse_list
         features["mae_list"] = mae_list
+
+        # if eval:
+        #     wandb.log({
+        #         "loss_spec/val_loss": loss.item(),
+        #         "loss_spec/val_nll_loss": nll_loss,
+        #         "loss_spec/val_mape": mape,
+        #         "loss_spec/val_rmse": rmse,
+        #     })
+        # else:
+        #     wandb.log({
+        #         "loss_spec/train_loss": loss.item(),
+        #         "loss_spec/train_nll_loss": nll_loss,
+        #         "loss_spec/train_mape": mape,
+        #         "loss_spec/train_rmse": rmse,
+        #     })
 
         return features
 
