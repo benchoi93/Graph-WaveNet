@@ -20,7 +20,7 @@ parser.add_argument('--aptonly', action='store_true', help='whether only adaptiv
 parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
 parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
-parser.add_argument('--nhid', type=int, default=32, help='')
+parser.add_argument('--nhid', type=int, default=64, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=128, help='batch size')
@@ -44,11 +44,17 @@ args = parser.parse_args()
 args.mix_mean = True if args.mix_mean == "True" else False
 wandb.init(project="GWN", config=args)
 
+print(wandb.config)
+
 args.pred_len = list(range(12))
 
 torch.backends.cudnn.benchmark = True
 
 def main():
+    args.n_components = wandb.config.n_components
+    args.mix_mean = wandb.config.mix_mean
+    args.rho = wandb.config.rho
+
     # set seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
