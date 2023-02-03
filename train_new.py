@@ -50,10 +50,12 @@ args.pred_len = list(range(12))
 
 torch.backends.cudnn.benchmark = True
 
+
 def main():
     args.n_components = wandb.config.n_components
     args.mix_mean = wandb.config.mix_mean
     args.rho = wandb.config.rho
+    args.seed = wandb.config.seed
 
     # set seed
     torch.manual_seed(args.seed)
