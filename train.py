@@ -5,36 +5,48 @@ import time
 import util
 import matplotlib.pyplot as plt
 from engine import trainer
-from mdn_engine import MDN_trainer
+import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
-parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
-parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
+# parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
+# parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
 parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
-parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
-parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
+# parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
+# parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
+parser.add_argument('--pred_seq', type=int, default=6, help='')
+parser.add_argument('--delay', type=int, default=4, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
 parser.add_argument('--nhid', type=int, default=128, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
-parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=256, help='batch size')
+parser.add_argument('--num_nodes', type=int, default=325, help='number of nodes')
+parser.add_argument('--batch_size', type=int, default=32, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
 parser.add_argument('--epochs', type=int, default=100000, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
-#parser.add_argument('--seed',type=int,default=99,help='random seed')
+# parser.add_argument('--seed',type=int,default=99,help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=5, help='experiment id')
-parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
-parser.add_argument('--save_every', type=int, default=20, help='experiment id')
+parser.add_argument('--n_components', type=int, default=5, help='')
+parser.add_argument('--reg_coef', type=float, default=0.1, help='')
+parser.add_argument('--save_every', type=int, default=20, help='')
+parser.add_argument('--fix_L_space', action="store_true", help='')
+parser.add_argument('--fix_L_batch', action="store_true", help='')
+parser.add_argument('--rho', type=float, default=0.0, help='')
 
 args = parser.parse_args()
+
+args.gcn_bool = True
+args.adjtype = 'doubletransition'
+args.addaptadj = True
+args.randomadj = True
+
+wandb.init(project="GWN_batch", config=args)
 
 
 def main():
@@ -44,22 +56,7 @@ def main():
     # load data
     device = torch.device(args.device)
     sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
-
-    target_sensors = ['404444',
-                      '404434',
-                      '400582',
-                      '400222',
-                      '400952',
-                      '400097',
-                      '401224',
-                      '401210',
-                      '400828',
-                      '400507',
-                      '400648',
-                      '400185']
-    target_sensor_inds = [sensor_id_to_ind[i] for i in target_sensors]
-
-    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size, target_sensor_inds=target_sensor_inds)
+    dataloader = util.load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size)
     scaler = dataloader['scaler']
     supports = [torch.tensor(i).to(device) for i in adj_mx]
 
@@ -73,15 +70,23 @@ def main():
     if args.aptonly:
         supports = None
 
-    adjinit = adjinit[:, target_sensor_inds][target_sensor_inds, :]
-
-    # engine = trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.nhid, args.dropout,
-    #                  args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-    #                  adjinit)
-
-    engine = MDN_trainer(scaler, args.in_dim, args.seq_length, args.num_nodes, args.num_rank, args.nhid, args.dropout,
-                         args.learning_rate, args.weight_decay, device, supports, args.gcn_bool, args.addaptadj,
-                         adjinit, n_components=args.n_components, reg_coef=args.reg_coef)
+    engine = trainer(scaler=scaler,
+                     in_dim=args.in_dim,
+                     seq_length=args.seq_length,
+                     num_nodes=args.num_nodes,
+                     nhid=args.nhid,
+                     dropout=args.dropout,
+                     lrate=args.learning_rate,
+                     wdecay=args.weight_decay,
+                     device=device,
+                     supports=supports,
+                     gcn_bool=args.gcn_bool,
+                     addaptadj=args.addaptadj,
+                     aptinit=adjinit,
+                     delay=args.delay,
+                     train_L_space=not args.fix_L_space,
+                     train_L_batch=not args.fix_L_batch,
+                     rho=args.rho,)
 
     print("start training...", flush=True)
     his_loss = []
@@ -89,27 +94,32 @@ def main():
     train_time = []
     for i in range(1, args.epochs+1):
         # if i % 10 == 0:
-        #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
-        # for g in engine.optimizer.param_groups:
-        #g['lr'] = lr
+        # lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
+        # lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
+        # g['lr'] = lr
+        # g['lr'] = lr
         train_loss = []
         train_mape = []
         train_rmse = []
-        train_nll_loss = []
-        train_reg_loss = []
         t1 = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
             trainx = torch.Tensor(x).to(device)
-            trainx = trainx.transpose(1, 3)
             trainy = torch.Tensor(y).to(device)
+            trainx = trainx.transpose(1, 3)
             trainy = trainy.transpose(1, 3)
-            metrics = engine.train(trainx, trainy[:, 0, :, :])
+
+            train_data = torch.concat((trainx, trainy), dim=3)
+            trainx = train_data[..., :(args.seq_length+args.delay)]  # 0-(12+4)
+            # convert it to 0-12, 1-13, 2-14, 3-15 and concat
+            trainx = torch.concat([trainx[..., i:(i+args.seq_length)] for i in range(args.delay)], dim=0)
+            trainy = train_data[..., (args.seq_length+args.pred_seq):(args.seq_length+args.delay+args.pred_seq)]  # 18,19,20,21
+            trainy = torch.concat([trainy[..., i] for i in range(args.delay)], dim=0)[:, 0, :].unsqueeze(-1)
+
+            metrics = engine.train(trainx, trainy)
             train_loss.append(metrics[0])
-            train_mape.append(metrics[1])
-            train_rmse.append(metrics[2])
-            train_nll_loss.append(metrics[3])
-            train_reg_loss.append(metrics[4])
+            train_mape.append(metrics[2])
+            train_rmse.append(metrics[1])
 
             if iter % args.print_every == 0:
                 log = 'Iter: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}'
@@ -120,21 +130,26 @@ def main():
         valid_loss = []
         valid_mape = []
         valid_rmse = []
-        valid_nll_loss = []
-        valid_reg_loss = []
 
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
-            testx = torch.Tensor(x).to(device)
-            testx = testx.transpose(1, 3)
-            testy = torch.Tensor(y).to(device)
-            testy = testy.transpose(1, 3)
-            metrics = engine.eval(testx, testy[:, 0, :, :])
+            trainx = torch.Tensor(x).to(device)
+            trainy = torch.Tensor(y).to(device)
+            trainx = trainx.transpose(1, 3)
+            trainy = trainy.transpose(1, 3)
+
+            train_data = torch.concat((trainx, trainy), dim=3)
+            trainx = train_data[..., :(args.seq_length+args.delay)]  # 0-(12+4)
+            # convert it to 0-12, 1-13, 2-14, 3-15 and concat
+            trainx = torch.concat([trainx[..., i:(i+args.seq_length)] for i in range(args.delay)], dim=0)
+            trainy = train_data[..., (args.seq_length+args.pred_seq):(args.seq_length+args.delay+args.pred_seq)]  # 18,19,20,21
+            trainy = torch.concat([trainy[..., i] for i in range(args.delay)], dim=0)[:, 0, :].unsqueeze(-1)
+
+            metrics = engine.eval(trainx, trainy)
+
             valid_loss.append(metrics[0])
             valid_mape.append(metrics[1])
             valid_rmse.append(metrics[2])
-            valid_nll_loss.append(metrics[3])
-            valid_reg_loss.append(metrics[4])
 
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
@@ -143,28 +158,22 @@ def main():
         mtrain_loss = np.mean(train_loss)
         mtrain_mape = np.mean(train_mape)
         mtrain_rmse = np.mean(train_rmse)
-        mtrain_nll_loss = np.mean(train_nll_loss)
-        mtrain_reg_loss = np.mean(train_reg_loss)
 
         mvalid_loss = np.mean(valid_loss)
         mvalid_mape = np.mean(valid_mape)
         mvalid_rmse = np.mean(valid_rmse)
-        mvalid_nll_loss = np.mean(valid_nll_loss)
-        mvalid_reg_loss = np.mean(valid_reg_loss)
         his_loss.append(mvalid_loss)
 
-        engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
-        engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
-
-        engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
-        engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
-        engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
-        engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
-
-        engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
-        engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
-        engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
-        engine.summary.add_scalar('loss/val_reg_loss', mvalid_reg_loss, i)
+        wandb.log(
+            {
+                "train_loss": mtrain_loss,
+                "train_mape": mtrain_mape,
+                "train_rmse": mtrain_rmse,
+                "val_loss": mvalid_loss,
+                "val_mape": mvalid_mape,
+                "val_rmse": mvalid_rmse,
+            }
+        )
 
         log = 'Epoch: {:03d}, Train Loss: {:.4f}, Train MAPE: {:.4f}, Train RMSE: {:.4f}, Valid Loss: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}, Training Time: {:.4f}/epoch'
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)

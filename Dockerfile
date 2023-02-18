@@ -1,5 +1,5 @@
-# FROM tensorflow/tensorflow:2.8.0-gpu-jupyter
-FROM gwn_mdn:default
+FROM tensorflow/tensorflow:2.8.0-gpu-jupyter
+# FROM gwn_mdn:default
 
 COPY . /app
 WORKDIR /app

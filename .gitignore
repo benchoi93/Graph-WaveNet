@@ -162,3 +162,5 @@ cython_debug/
 garage/
 .vscode/
 logs/
+data/
+wandb/

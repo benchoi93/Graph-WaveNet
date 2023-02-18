@@ -7,7 +7,7 @@ from scipy.sparse import linalg
 
 
 class DataLoader(object):
-    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True):
+    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True, delay = 0):
         """
         :param xs:
         :param ys:
