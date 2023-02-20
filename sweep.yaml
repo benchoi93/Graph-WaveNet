@@ -1,0 +1,17 @@
+program: train.py # the program to run
+method: grid # among bayes, grid, random
+metric:
+  name: val_loss # need to log this metric in your code
+  goal: minimize # among minimize, maximize
+parameters:
+  train_L_batch:
+    values: [1]
+    # values: [1, 0]
+  train_L_space:
+    values: [0]
+    # values: [1, 0]
+  train_L_time:
+    # values: [1, 0]
+    values: [0]
+  delay:
+    values: [4,3,2,1]

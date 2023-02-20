@@ -7,7 +7,7 @@ from scipy.sparse import linalg
 
 
 class DataLoader(object):
-    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True, delay = 0):
+    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True, delay=1):
         """
         :param xs:
         :param ys:
@@ -22,7 +22,7 @@ class DataLoader(object):
             y_padding = np.repeat(ys[-1:], num_padding, axis=0)
             xs = np.concatenate([xs, x_padding], axis=0)
             ys = np.concatenate([ys, y_padding], axis=0)
-        self.size = len(xs)
+        self.size = len(xs) - (delay-1)
         self.num_batch = int(self.size // self.batch_size)
         self.xs = xs
         self.ys = ys
@@ -146,7 +146,7 @@ def load_adj(pkl_filename, adjtype):
     return sensor_ids, sensor_id_to_ind, adj
 
 
-def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None, target_sensor_inds=None):
+def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None, target_sensor_inds=None, delay=1):
     data = {}
     for category in ['train', 'val', 'test']:
         cat_data = np.load(os.path.join(dataset_dir, category + '.npz'))
@@ -161,9 +161,9 @@ def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size
     # Data format
     for category in ['train', 'val', 'test']:
         data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
-    data['train_loader'] = DataLoader(data['x_train'], data['y_train'], batch_size)
-    data['val_loader'] = DataLoader(data['x_val'], data['y_val'], valid_batch_size)
-    data['test_loader'] = DataLoader(data['x_test'], data['y_test'], test_batch_size)
+    data['train_loader'] = DataLoader(data['x_train'], data['y_train'], batch_size, delay=delay)
+    data['val_loader'] = DataLoader(data['x_val'], data['y_val'], valid_batch_size, delay=delay)
+    data['test_loader'] = DataLoader(data['x_test'], data['y_test'], test_batch_size, delay=delay)
     data['scaler'] = scaler
     return data
 
