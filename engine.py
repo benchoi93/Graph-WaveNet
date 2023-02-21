@@ -61,7 +61,7 @@ def kron_vec_prod(As, vt, align=2):
 
 
 class covariance(nn.Module):
-    def __init__(self, num_nodes, delay, pred_len, device, n_components=1, rho=1, train_L_space=True, train_L_time=True, train_L_batch=True):
+    def __init__(self, num_nodes, delay, pred_len, device, n_components=1, train_L_space=True, train_L_time=True, train_L_batch=True):
         super(covariance, self).__init__()
 
         self.n_components = n_components
@@ -103,12 +103,13 @@ class covariance(nn.Module):
 
 
 class batch_opt(nn.Module):
-    def __init__(self, num_nodes, delay, rho=1):
+    def __init__(self, num_nodes, delay, rho=1, det="mse"):
         super(batch_opt, self).__init__()
 
         self.num_nodes = num_nodes
         self.delay = delay
         self.rho = rho
+        self.det = det
 
     def get_nll_2d(self, pred, target, L_list, logw=None):
         R = (pred - target)
@@ -164,8 +165,14 @@ class batch_opt(nn.Module):
         mask /= torch.mean((mask))
         mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
 
-        mse_loss = (pred-target) ** 2
-        mse_loss = mse_loss[:, 0, :, :]  # TODO: just for now for 1 component
+        pred = pred.unsqueeze(1)
+
+        if self.det == "mse":
+            mse_loss = (pred-target) ** 2
+        elif self.det == "mae":
+            mse_loss = torch.abs(pred-target)
+        else:
+            raise NotImplementedError
 
         mse_loss = mse_loss * mask
         mse_loss = torch.where(torch.isnan(mse_loss), torch.zeros_like(mse_loss), mse_loss)
@@ -186,7 +193,8 @@ class batch_opt(nn.Module):
 
 class trainer():
     def __init__(self, scaler, in_dim, seq_length, num_nodes, nhid, dropout, lrate,
-                 wdecay, device, supports, gcn_bool, addaptadj, aptinit, delay, **kwargs):
+                 wdecay, device, supports, gcn_bool, addaptadj, aptinit, delay,
+                 train_L_space, train_L_time, train_L_batch, rho, det):
 
         self.model = gwnet(device, num_nodes, dropout,
                            supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj,
@@ -194,10 +202,13 @@ class trainer():
                            residual_channels=nhid, dilation_channels=nhid,
                            skip_channels=nhid * 8, end_channels=nhid * 16)
         self.model.to(device)
-        self.covariance = covariance(num_nodes, delay, seq_length, device, **kwargs)
+        self.covariance = covariance(num_nodes, delay, seq_length, device,
+                                     train_L_space=train_L_space,
+                                     train_L_time=train_L_time,
+                                     train_L_batch=train_L_batch)
 
         # self.loss = util.masked_mae
-        self.loss_class = batch_opt(num_nodes, delay)
+        self.loss_class = batch_opt(num_nodes, delay, rho=rho, det=det)
         self.loss = self.loss_class.loss
 
         self.model_list = nn.ModuleDict(
@@ -230,9 +241,9 @@ class trainer():
         return loss.item(), mape, rmse, mae
 
     def get_metrics(self, predict, real_val):
-        mape = util.masked_mape(predict, real_val,0).item()
-        rmse = util.masked_rmse(predict, real_val,0).item()
-        mae = util.masked_mae(predict, real_val,0).item()
+        mape = util.masked_mape(predict, real_val, 0).item()
+        rmse = util.masked_rmse(predict, real_val, 0).item()
+        mae = util.masked_mae(predict, real_val, 0).item()
 
         return mape, rmse, mae
 

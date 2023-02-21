@@ -32,17 +32,18 @@ parser.add_argument('--print_every', type=int, default=50, help='')
 # parser.add_argument('--seed',type=int,default=99,help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=5, help='')
+
 parser.add_argument('--reg_coef', type=float, default=0.1, help='')
 parser.add_argument('--save_every', type=int, default=20, help='')
-parser.add_argument('--rho', type=float, default=0.0, help='')
 
-parser.add_argument('--pred_seq', type=int, default=6, help='')
-parser.add_argument('--delay', type=int, default=3, help='')
+parser.add_argument('--rho', type=float, default=1, help='')
+parser.add_argument('--delay', type=int, default=1, help='')
 
-parser.add_argument('--train_L_batch', default=1, type=int, help='')
-parser.add_argument('--train_L_space', default=1, type=int, help='')
-parser.add_argument('--train_L_time', default=1, type=int, help='')
+parser.add_argument('--train_L_batch', default=0, type=int, help='')
+parser.add_argument('--train_L_space', default=0, type=int, help='')
+parser.add_argument('--train_L_time', default=0, type=int, help='')
+
+parser.add_argument('--det', type=str, default="mse", choices=["mse", "mae"], help='')
 
 args = parser.parse_args()
 
@@ -104,7 +105,8 @@ def main():
                      train_L_space=args.train_L_space,
                      train_L_batch=args.train_L_batch,
                      train_L_time=args.train_L_time,
-                     rho=args.rho,)
+                     rho=args.rho,
+                     det=args.det,)
 
     print("start training...", flush=True)
     his_loss = []
