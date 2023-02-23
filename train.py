@@ -37,13 +37,14 @@ parser.add_argument('--reg_coef', type=float, default=0.1, help='')
 parser.add_argument('--save_every', type=int, default=20, help='')
 
 parser.add_argument('--rho', type=float, default=1, help='')
-parser.add_argument('--delay', type=int, default=1, help='')
+parser.add_argument('--delay', type=int, default=2, help='')
 
-parser.add_argument('--train_L_batch', default=0, type=int, help='')
+parser.add_argument('--train_L_batch', default=1, type=int, help='')
 parser.add_argument('--train_L_space', default=0, type=int, help='')
 parser.add_argument('--train_L_time', default=0, type=int, help='')
 
-parser.add_argument('--det', type=str, default="mse", choices=["mse", "mae"], help='')
+parser.add_argument('--det', type=str, default="mae", choices=["mse", "mae"], help='')
+parser.add_argument('--nll', type=str, default="MGD", choices=["MGD", "MLD", "MLD_abs", "GAL"], help='')
 
 args = parser.parse_args()
 
@@ -59,7 +60,8 @@ args.train_L_time = True if args.train_L_time == 1 else False
 args.batch_size = args.batch_size // args.delay
 
 wandb.init(project="GWN_batch2", config=args,
-           name=f"GWN_testbatch_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}")
+           name=f"GWN_testbatch_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}",
+           )
 
 save_dir = f"./model_save/GWN_testbatch_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}"
 
@@ -106,7 +108,8 @@ def main():
                      train_L_batch=args.train_L_batch,
                      train_L_time=args.train_L_time,
                      rho=args.rho,
-                     det=args.det,)
+                     det=args.det,
+                     nll=args.nll)
 
     print("start training...", flush=True)
     his_loss = []
@@ -130,10 +133,14 @@ def main():
             trainx = trainx.transpose(1, 3)
             trainy = trainy.transpose(1, 3)
 
+            trainx[:, 0, :, :] = scaler.inverse_transform(trainx[:, 0, :, :])
             train_data = torch.concat((trainx, trainy), dim=3)
+
             train_data = torch.stack([train_data[..., i:i+args.seq_length*2] for i in range(args.delay)], dim=1)
             trainx = train_data[..., :args.seq_length]
             trainy = train_data[..., args.seq_length:]
+
+            trainx[:, :, 0, :, :] = scaler.transform(trainx[:, :, 0, :, :])
 
             metrics = engine.train(trainx, trainy[:, :, 0, :, :])
             train_loss.append(metrics[0])
@@ -162,10 +169,8 @@ def main():
             trainx = trainx.transpose(1, 3)
             trainy = trainy.transpose(1, 3)
 
-            train_data = torch.concat((trainx, trainy), dim=3)
-            train_data = torch.stack([train_data[..., i:i+args.seq_length*2] for i in range(args.delay)], dim=1)
-            trainx = train_data[..., :args.seq_length]
-            trainy = train_data[..., args.seq_length:]
+            trainx = trainx.unsqueeze(1)
+            trainy = trainy[..., :args.seq_length].unsqueeze(1)
 
             metrics = engine.eval(trainx, trainy[:, :, 0, :, :])
 
@@ -199,7 +204,7 @@ def main():
                 "val/01_rmse": mvalid_rmse,
                 "val/02_mape": mvalid_mape,
                 "val/03_mae": mvalid_mae,
-                "val/04_loss": mvalid_loss,
+                # "val/04_loss": mvalid_loss,
             },
             step=i,
         )
@@ -228,13 +233,11 @@ def main():
         testx = testx.transpose(1, 3)
         testy = testy.transpose(1, 3)
 
-        test_data = torch.concat((testx, testy), dim=3)
-        test_data = torch.stack([test_data[..., i:i+args.seq_length*2] for i in range(args.delay)], dim=1)
-        testx = test_data[..., :args.seq_length]
-        testy = test_data[..., args.seq_length:]
+        testx = testx.unsqueeze(1)
+        testy = testy[..., :args.seq_length].unsqueeze(1)
 
         with torch.no_grad():
-            loss, preds = engine.process_batch(testx, testy[:, :, 0, :, :])
+            preds = engine.process_batch(testx, testy[:, :, 0, :, :], test=True)
             # preds = engine.model(testx)
         outputs.append(preds.squeeze())
         realy.append(testy[:, :, 0, :, :].squeeze())
@@ -243,8 +246,8 @@ def main():
     yhat = torch.cat(outputs, dim=0)
     realy = torch.cat(realy, dim=0)
 
-    yhat = yhat.reshape(yhat.shape[0] * yhat.shape[1], yhat.shape[2], yhat.shape[3])
-    realy = realy.reshape(realy.shape[0] * realy.shape[1], realy.shape[2], realy.shape[3])
+    yhat = yhat.reshape(yhat.shape[0], yhat.shape[1], yhat.shape[2])
+    realy = realy.reshape(realy.shape[0], realy.shape[1], realy.shape[2])
 
     print("Training finished")
 
