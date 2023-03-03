@@ -167,9 +167,9 @@ class batch_opt(nn.Module):
 
         nll = -(
             logdet +
-            (- 0.5 * torch.log(2 + L_gamma.norm(p=2, dim=(-1, -2, -3)).pow(2))) +
-            (-torch.sqrt((2 + L_gamma.norm(p=2, dim=(-1, -2, -3)).pow(2)) * L_x.norm(p=2, dim=(-1, -2, -3)).pow(2))) +
-            (L_x.reshape(b, 1, d*n*t) * L_gamma.reshape(b, 1, d*n*t)).sum(-1)
+            (- 0.5 * torch.log(2 + L_gamma.pow(2).sum((-1, -2, -3)))) +
+            (- torch.sqrt((2 + L_gamma.pow(2).sum((-1, -2, -3)))) * L_x.pow(2).sum((-1, -2, -3))) +
+            (L_x * L_gamma).sum((-1,-2,-3))
         )
         # nll = - torch.logsumexp(nll, dim=1)
         return nll

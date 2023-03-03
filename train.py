@@ -58,12 +58,13 @@ args.train_L_space = True if args.train_L_space == 1 else False
 args.train_L_time = True if args.train_L_time == 1 else False
 
 args.batch_size = args.batch_size // args.delay
+save_dir = f"./model_save/GWN_testbatch_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}"
+args.save_dir = save_dir
 
 wandb.init(project="GWN_batch2", config=args,
            name=f"GWN_testbatch_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}",
            )
 
-save_dir = f"./model_save/GWN_testbatch_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}"
 
 if os.path.exists(save_dir) is False:
     os.makedirs(save_dir, exist_ok=True)
