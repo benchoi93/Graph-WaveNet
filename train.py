@@ -37,13 +37,13 @@ parser.add_argument('--reg_coef', type=float, default=0.1, help='')
 parser.add_argument('--save_every', type=int, default=20, help='')
 
 parser.add_argument('--rho', type=float, default=1, help='')
-parser.add_argument('--delay', type=int, default=2, help='')
+parser.add_argument('--delay', type=int, default=3, help='')
 
 parser.add_argument('--train_L_batch', default=1, type=int, help='')
 parser.add_argument('--train_L_space', default=0, type=int, help='')
-parser.add_argument('--train_L_time', default=0, type=int, help='')
+parser.add_argument('--train_L_time', default=1, type=int, help='')
 
-parser.add_argument('--det', type=str, default="mae", choices=["mse", "mae"], help='')
+parser.add_argument('--det', type=str, default="mse", choices=["mse", "mae"], help='')
 parser.add_argument('--nll', type=str, default="MGD", choices=["MGD", "MLD", "MLD_abs", "GAL"], help='')
 
 args = parser.parse_args()
@@ -60,6 +60,7 @@ args.train_L_time = True if args.train_L_time == 1 else False
 args.batch_size = args.batch_size // args.delay
 save_dir = f"./model_save/GWN_testbatch_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}"
 args.save_dir = save_dir
+# save_dir="./model_save/GWN_testbatch_20230302-230833_spaceTrue_timeTrue_batchTrue_rho1.0_delay4"
 
 wandb.init(project="GWN_batch2", config=args,
            name=f"GWN_testbatch_space{args.train_L_space}_time{args.train_L_time}_batch{args.train_L_batch}_rho{args.rho}_delay{args.delay}",
@@ -214,7 +215,7 @@ def main():
         print(log.format(i, mtrain_loss, mtrain_mape, mtrain_rmse, mvalid_loss, mvalid_mape, mvalid_rmse, (t2 - t1)), flush=True)
 
         if i % args.save_every == 0:
-            torch.save(engine.model.state_dict(), save_dir+f"/model_epoch_{i}.pth")
+            torch.save(engine.model_list.state_dict(), save_dir+f"/model_epoch_{i}.pth")
         # break
     print("Average Training Time: {:.4f} secs/epoch".format(np.mean(train_time)))
     print("Average Inference Time: {:.4f} secs".format(np.mean(val_time)))
@@ -267,7 +268,7 @@ def main():
 
     log = 'On average over 12 horizons, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'
     print(log.format(np.mean(amae), np.mean(amape), np.mean(armse)))
-    torch.save(engine.model.state_dict(), save_dir+"/model_best.pth")
+    torch.save(engine.model_list.state_dict(), save_dir+"/model_best.pth")
 
     for i in range(12):
         wandb.log(
