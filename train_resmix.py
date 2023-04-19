@@ -8,6 +8,7 @@ from engine import trainer
 # from mdn_engine import MDN_trainer
 from Fixed_mdn_engine_resmix import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
+import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
@@ -58,6 +59,12 @@ args.gcn_bool = True
 args.addaptadj = True
 args.randomadj = True
 args.adjtype = 'doubletransition'
+
+import os
+os.environ['WANDB_API_KEY']='your-API-key'
+os.environ['WANDB_ENTITY']='your-wandb-username'
+
+wandb.init(project="GWN_resmix", config=args)
 
 
 def main():
@@ -139,9 +146,9 @@ def main():
     best_val_loss = float('inf')
     for i in range(0, args.epochs+1):
         # if i % 10 == 0:
-        #lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
+        # lr = max(0.000002,args.learning_rate * (0.1 ** (i // 10)))
         # for g in engine.optimizer.param_groups:
-        #g['lr'] = lr
+        # g['lr'] = lr
         train_loss = []
         train_mape = []
         train_rmse = []
@@ -150,8 +157,8 @@ def main():
         train_reg_loss = []
         # train_crps_loss = []
         t1 = time.time()
-        dataloader['train_loader'].shuffle()
-        for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
+        for iter, (x, y) in enumerate(dataloader['train_loader']):
+
             trainx = torch.Tensor(x).to(device)
             trainx = trainx.transpose(1, 3)
             trainy = torch.Tensor(y).to(device)
@@ -181,7 +188,7 @@ def main():
         valid_es_loss = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['val_loader'].get_iterator()):
+        for iter, (x, y) in enumerate(dataloader['val_loader']):
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)
             testy = torch.Tensor(y).to(device)
@@ -216,7 +223,7 @@ def main():
         test_mae_list = []
 
         s1 = time.time()
-        for iter, (x, y) in enumerate(dataloader['test_loader'].get_iterator()):
+        for iter, (x, y) in enumerate(dataloader['test_loader']):
             testx = torch.Tensor(x).to(device)
             testx = testx.transpose(1, 3)
             testy = torch.Tensor(y).to(device)
@@ -269,39 +276,69 @@ def main():
 
         his_loss.append(mvalid_loss)
 
-        engine.summary.add_scalar('time/train_time', train_time[-1], i)
-        engine.summary.add_scalar('time/val_time', val_time[-1], i)
+        # engine.summary.add_scalar('time/train_time', train_time[-1], i)
+        # engine.summary.add_scalar('time/val_time', val_time[-1], i)
 
-        engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
-        engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
+        # engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
+        # engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
 
-        engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
-        engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
-        # engine.summary.add_scalar('errors/train_crps', mtrain_crps_loss, i)
-        engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
-        engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
-        engine.summary.add_scalar('errors/val_crps', mvalid_crps_loss, i)
-        engine.summary.add_scalar('errors/val_es', mvalid_es_loss, i)
+        # engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
+        # engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
+        # # engine.summary.add_scalar('errors/train_crps', mtrain_crps_loss, i)
+        # engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
+        # engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
+        # engine.summary.add_scalar('errors/val_crps', mvalid_crps_loss, i)
+        # engine.summary.add_scalar('errors/val_es', mvalid_es_loss, i)
 
-        engine.summary.add_scalar('errors/test_mape', mtest_mape, i)
-        engine.summary.add_scalar('errors/test_rmse', mtest_rmse, i)
-        engine.summary.add_scalar('errors/test_crps', mtest_crps_loss, i)
-        engine.summary.add_scalar('errors/test_es', mtest_es_loss, i)
+        # engine.summary.add_scalar('errors/test_mape', mtest_mape, i)
+        # engine.summary.add_scalar('errors/test_rmse', mtest_rmse, i)
+        # engine.summary.add_scalar('errors/test_crps', mtest_crps_loss, i)
+        # engine.summary.add_scalar('errors/test_es', mtest_es_loss, i)
 
-        engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
-        engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
-        engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
-        engine.summary.add_scalar('loss/val_reg_loss', mvalid_reg_loss, i)
-        engine.summary.add_scalar('loss/test_nll_loss', mtest_nll_loss, i)
-        engine.summary.add_scalar('loss/test_reg_loss', mtest_reg_loss, i)
-        engine.summary.add_scalar('loss/train_mse_loss', np.mean(train_mse_loss), i)
-        engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
-        engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
+        # engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
+        # engine.summary.add_scalar('loss/train_reg_loss', mtrain_reg_loss, i)
+        # engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
+        # engine.summary.add_scalar('loss/val_reg_loss', mvalid_reg_loss, i)
+        # engine.summary.add_scalar('loss/test_nll_loss', mtest_nll_loss, i)
+        # engine.summary.add_scalar('loss/test_reg_loss', mtest_reg_loss, i)
+        # engine.summary.add_scalar('loss/train_mse_loss', np.mean(train_mse_loss), i)
+        # engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
+        # engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
+
+        # for j in range(len(args.pred_len)):
+        #     engine.summary.add_scalar(f'errors_spec/test_mape_{j}', mtest_mape_list[j], i)
+        #     engine.summary.add_scalar(f'errors_spec/test_rmse_{j}', mtest_rmse_list[j], i)
+        #     engine.summary.add_scalar(f'errors_spec/test_mae_{j}', mtest_mae_list[j], i)
+
+        wandb.log(
+            {
+                "train_loss": mtrain_loss,
+                "train_mape": mtrain_mape,
+                "train_rmse": mtrain_rmse,
+                "train_nll_loss": mtrain_nll_loss,
+                "train_mse_loss": np.mean(train_mse_loss),
+                "valid_loss": mvalid_loss,
+                "valid_mape": mvalid_mape,
+                "valid_rmse": mvalid_rmse,
+                "valid_nll_loss": mvalid_nll_loss,
+                "valid_mse_loss": np.mean(valid_mse_loss),
+                "test_loss": mtest_loss,
+                "test_mape": mtest_mape,
+                "test_rmse": mtest_rmse,
+                "test_nll_loss": mtest_nll_loss,
+                "test_mse_loss": np.mean(test_mse_loss),
+            }
+        )
 
         for j in range(len(args.pred_len)):
-            engine.summary.add_scalar(f'errors_spec/test_mape_{j}', mtest_mape_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_rmse_{j}', mtest_rmse_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_mae_{j}', mtest_mae_list[j], i)
+            wandb.log(
+                {
+                    f"test_mape_{j}": mtest_mape_list[j],
+                    f"test_rmse_{j}": mtest_rmse_list[j],
+                    f"test_mae_{j}": mtest_mae_list[j],
+                }
+            )
+            
 
         # engine.summary.add_scalar('loss/rho', torch.sigmoid(engine.covariance.rho).item(), i)
 
@@ -357,7 +394,6 @@ def main():
     mtest_mape = np.mean(test_mape)
     mtest_rmse = np.mean(test_rmse)
     mtest_nll_loss = np.mean(test_nll_loss)
-    mtest_reg_loss = np.mean(test_reg_loss)
     mtest_mse_loss = np.mean(test_mse_loss)
     mtest_crps_loss = np.mean(test_crps_loss)
     mtest_es_loss = np.mean(test_es_loss)
@@ -367,10 +403,21 @@ def main():
     print("Test MAPE: {:.4f}".format(mtest_mape))
     print("Test RMSE: {:.4f}".format(mtest_rmse))
     print("Test NLL Loss: {:.4f}".format(mtest_nll_loss))
-    print("Test Reg Loss: {:.4f}".format(mtest_reg_loss))
     print("Test MSE Loss: {:.4f}".format(mtest_mse_loss))
     print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
     print("Test ES Loss: {:.4f}".format(mtest_es_loss))
+
+    wandb.log(
+        {
+            "test_loss": mtest_loss,
+            "test_mape": mtest_mape,
+            "test_rmse": mtest_rmse,
+            "test_nll_loss": mtest_nll_loss,
+            "test_mse_loss": mtest_mse_loss,
+            "test_crps_loss": mtest_crps_loss,
+            "test_es_loss": mtest_es_loss,
+        }
+    )
 
 
 if __name__ == "__main__":
