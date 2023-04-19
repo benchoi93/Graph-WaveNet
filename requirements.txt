@@ -2,10 +2,11 @@ matplotlib
 numpy
 scipy
 pandas
-torch
-argparse
-tensorboard
-tensorboardX
-properscoring
-matplotlib
-seaborn
+# torch
+# argparse
+# tensorboard
+# tensorboardX
+# properscoring
+# matplotlib
+# seaborn
+wandb

@@ -1,9 +1,9 @@
 import torch.optim as optim
 from model import *
 import util
-import properscoring as ps
+# import properscoring as ps
 
-import seaborn as sns
+# import seaborn as sns
 
 import torch.nn as nn
 import torch.distributions as Dist
@@ -37,10 +37,10 @@ class LowRankMDNhead(nn.Module):
 
         # check if 'w' , 'mu' , 'D' and 'V' are in features.keys()
         # raise error if not
-        assert('w' in features.keys())
-        assert('mu' in features.keys())
-        assert('D' in features.keys())
-        assert('V' in features.keys())
+        assert ('w' in features.keys())
+        assert ('mu' in features.keys())
+        assert ('D' in features.keys())
+        assert ('V' in features.keys())
 
         dist = self.get_output_distribution(features)
         nll_loss = - dist.log_prob(y[:, :, self.pred_len - 1]).mean()
@@ -53,7 +53,8 @@ class LowRankMDNhead(nn.Module):
         precision = dist.component_distribution.precision_matrix
         b, n, d, _ = precision.size()
         # get LASSO for non-diagonal elements of precision matrices
-        reg_loss = precision.flatten(2)[:, :, 1:].view(b, n, d-1, d+1)[:, :, :, :-1].abs().mean()
+        reg_loss = precision.flatten(2)[:, :, 1:].view(
+            b, n, d-1, d+1)[:, :, :, :-1].abs().mean()
         return reg_loss
 
     def sample(self, features, n=None):
@@ -104,7 +105,8 @@ class MDN_trainer():
 
         self.model = gwnet(device, num_nodes, dropout, supports=supports, gcn_bool=gcn_bool, addaptadj=addaptadj, aptinit=aptinit,
                            in_dim=in_dim, out_dim=dim_out, residual_channels=nhid, dilation_channels=nhid, skip_channels=nhid * 8, end_channels=nhid * 16)
-        self.mdn_head = LowRankMDNhead(n_components, num_nodes, num_rank, reg_coef=reg_coef)
+        self.mdn_head = LowRankMDNhead(
+            n_components, num_nodes, num_rank, reg_coef=reg_coef)
         # dim_w = [batn_components]
         # dims_c = dim_w, dim_mu, dim_U_entries, dim_i
         # self.mdn = FrEIA.modules.GaussianMixtureModel(dims_in, dims_c)
@@ -123,7 +125,8 @@ class MDN_trainer():
         # self.mdn_head.to(device)
         self.fc_w.to(device)
 
-        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.fc_w.parameters()), lr=lrate, weight_decay=wdecay)
+        self.optimizer = optim.Adam(list(self.model.parameters(
+        )) + list(self.fc_w.parameters()), lr=lrate, weight_decay=wdecay)
         # self.loss = util.masked_mae
         self.scaler = scaler
         self.clip = 5
@@ -153,7 +156,8 @@ class MDN_trainer():
         output = self.model(input)
         output = output.transpose(1, 3)
 
-        output = output.view(-1, self.num_nodes, self.n_components, self.out_per_comp)
+        output = output.view(-1, self.num_nodes,
+                             self.n_components, self.out_per_comp)
 
         # w = output[:, :, :, :self.dim_w]
         mus = output[:, :, :, 0]
@@ -168,24 +172,28 @@ class MDN_trainer():
         V = torch.einsum('abcd -> acbd', V)
 
         output = torch.einsum("bijk->bjik", output)
-        output = output.reshape(-1, self.n_components, self.num_nodes * self.out_per_comp)
+        output = output.reshape(-1, self.n_components,
+                                self.num_nodes * self.out_per_comp)
         w = self.fc_w(output)
         # w activate softmax0
         w = nn.functional.softmax(w, dim=1)
 
         scaled_real_val = self.scaler.transform(real_val)
-        loss, nll_loss, reg_loss = self.mdn_head.forward(features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
+        loss, nll_loss, reg_loss = self.mdn_head.forward(
+            features={'w': w, 'mu': mus, 'D': D, 'V': V}, y=scaled_real_val)
 
         if not eval:
             self.optimizer.zero_grad()
             loss.backward()
             if self.clip is not None:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.clip)
             self.optimizer.step()
         # mape = util.masked_mape(predict, real, 0.0).item()
         # rmse = util.masked_rmse(predict, real, 0.0).item()
         real = real_val[:, :, self.pred_len - 1]
-        output = self.mdn_head.sample(features={'w': w, 'mu': mus, 'D': D, 'V': V})
+        output = self.mdn_head.sample(
+            features={'w': w, 'mu': mus, 'D': D, 'V': V})
         predict = self.scaler.inverse_transform(output)
         mape = util.masked_mape(predict, real, 0.0).item()
         rmse = util.masked_rmse(predict, real, 0.0).item()
@@ -217,7 +225,8 @@ class MDN_trainer():
         V = info['V']
         scaled_real_val = self.scaler.transform(real_val)
 
-        crps = self.specific_eval(features={'w': w, 'mu': mus, 'D': D, 'V': V, 'target': scaled_real_val})
+        crps = self.specific_eval(
+            features={'w': w, 'mu': mus, 'D': D, 'V': V, 'target': scaled_real_val})
 
         info = {
             "w": info["w"],
@@ -247,39 +256,45 @@ class MDN_trainer():
         crps = torch.zeros(size=(b, n))
         for i in range(b):
             for j in range(n):
-                pred = self.scaler.inverse_transform(output[:, i, j]).cpu().numpy()
+                pred = self.scaler.inverse_transform(
+                    output[:, i, j]).cpu().numpy()
                 pred[pred < 0] = 0
-                crps[i, j] = ps.crps_ensemble(real_val[i, j].cpu().numpy(), pred)
+                # crps[i, j] = ps.crps_ensemble(
+                #     real_val[i, j].cpu().numpy(), pred)
         # self.summary.add_scalar('val/crps', crps.mean().item(), self.cnt)
 
         return crps.mean()
 
-    def plot_cov(self, features):
-        dist = self.mdn_head.get_output_distribution(features)
-        sample_cov = dist.component_distribution.covariance_matrix[0]
-        sample_prec = dist.component_distribution.precision_matrix[0]
+    # def plot_cov(self, features):
+    #     dist = self.mdn_head.get_output_distribution(features)
+    #     sample_cov = dist.component_distribution.covariance_matrix[0]
+    #     sample_prec = dist.component_distribution.precision_matrix[0]
 
-        corr = torch.zeros_like(sample_cov)
-        for i in range(sample_cov.size(0)):
-            corr[i] = torch.corrcoef(sample_cov[i])
+    #     corr = torch.zeros_like(sample_cov)
+    #     for i in range(sample_cov.size(0)):
+    #         corr[i] = torch.corrcoef(sample_cov[i])
 
-        sparsity = (sample_prec.abs() > 0.01).float()
+    #     sparsity = (sample_prec.abs() > 0.01).float()
 
-        for i in range(sample_cov.shape[0]):
-            sns_plot = sns.heatmap(corr[i].detach().cpu().numpy(), cmap='coolwarm', vmin=-1, vmax=1)
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('corr_matrix/' + str(i), fig,  self.cnt)
+    #     for i in range(sample_cov.shape[0]):
+    #         sns_plot = sns.heatmap(corr[i].detach().cpu(
+    #         ).numpy(), cmap='coolwarm', vmin=-1, vmax=1)
+    #         fig = sns_plot.get_figure()
+    #         self.summary.add_figure('corr_matrix/' + str(i), fig,  self.cnt)
 
-            sns_plot = sns.heatmap(sample_cov[i].detach().cpu().numpy(), cmap='coolwarm')
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('cov_matrix/' + str(i), fig,  self.cnt)
+    #         sns_plot = sns.heatmap(
+    #             sample_cov[i].detach().cpu().numpy(), cmap='coolwarm')
+    #         fig = sns_plot.get_figure()
+    #         self.summary.add_figure('cov_matrix/' + str(i), fig,  self.cnt)
 
-            sns_plot = sns.heatmap(sample_prec[i].detach().cpu().numpy(), cmap='coolwarm')
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('prec_matrix/' + str(i), fig,  self.cnt)
+    #         sns_plot = sns.heatmap(
+    #             sample_prec[i].detach().cpu().numpy(), cmap='coolwarm')
+    #         fig = sns_plot.get_figure()
+    #         self.summary.add_figure('prec_matrix/' + str(i), fig,  self.cnt)
 
-            sns_plot = sns.heatmap(sparsity[i].detach().cpu().numpy(), cmap='coolwarm')
-            fig = sns_plot.get_figure()
-            self.summary.add_figure('sparsity/' + str(i), fig,  self.cnt)
+    #         sns_plot = sns.heatmap(
+    #             sparsity[i].detach().cpu().numpy(), cmap='coolwarm')
+    #         fig = sns_plot.get_figure()
+    #         self.summary.add_figure('sparsity/' + str(i), fig,  self.cnt)
 
-        self.cnt += 1
+    #     self.cnt += 1

@@ -11,38 +11,51 @@ from Fixed_mdn_engine_resmix import MDN_trainer
 # from Diag_Fixed_mdn_engine import MDN_trainer
 import torch.nn as nn
 import seaborn as sns
-import properscoring as ps
+# import properscoring as ps
 from tqdm import tqdm
 
 import sys
 sys.argv = ['']
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda', help='')
-parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
-parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
+parser.add_argument('--data', type=str,
+                    default='data/PEMS-BAY', help='data path')
+parser.add_argument('--adjdata', type=str,
+                    default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 # parser.add_argument('--data', type=str, default='data/METR-LA', help='data path')
 # parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx.pkl', help='adj data path')
-parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
-parser.add_argument('--gcn_bool', action='store_true', help='whether to add graph convolution layer')
-parser.add_argument('--aptonly', action='store_true', help='whether only adaptive adj')
-parser.add_argument('--addaptadj', action='store_true', help='whether add adaptive adj')
-parser.add_argument('--randomadj', action='store_true', help='whether random initialize adaptive adj')
+parser.add_argument('--adjtype', type=str,
+                    default='doubletransition', help='adj type')
+parser.add_argument('--gcn_bool', action='store_true',
+                    help='whether to add graph convolution layer')
+parser.add_argument('--aptonly', action='store_true',
+                    help='whether only adaptive adj')
+parser.add_argument('--addaptadj', action='store_true',
+                    help='whether add adaptive adj')
+parser.add_argument('--randomadj', action='store_true',
+                    help='whether random initialize adaptive adj')
 parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--num-rank', type=int, default=5, help='')
 parser.add_argument('--nhid', type=int, default=4, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
-parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
+parser.add_argument('--num_nodes', type=int,
+                    default=12, help='number of nodes')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size')
-parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
+parser.add_argument('--learning_rate', type=float,
+                    default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
-parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
+parser.add_argument('--weight_decay', type=float,
+                    default=0.0001, help='weight decay rate')
 parser.add_argument('--epochs', type=int, default=100000, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--seed', type=int, default=99, help='random seed')
-parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
+parser.add_argument('--save', type=str,
+                    default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=6, help='experiment id')
-parser.add_argument('--reg_coef', type=float, default=0.1, help='experiment id')
+parser.add_argument('--n_components', type=int,
+                    default=6, help='experiment id')
+parser.add_argument('--reg_coef', type=float,
+                    default=0.1, help='experiment id')
 parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 # parser.add_argument("--model_path", default="./logs_0614_predlen_test/GWN_MDN_20220614-163156_N6_R5_reg0.001_nhid4_pred3", type=str,  help="path to model")
 # parser.add_argument("--pred-len", type=int, default=12)
@@ -149,28 +162,39 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     cor_t = torch.zeros_like(cov_t)
 
     for i in range(cov_s.shape[0]):
-        cor_s[i] = cov_s[i] / (torch.sqrt(torch.diag(cov_s[i]))[:, None] * torch.sqrt(torch.diag(cov_s[i]))[None, :])
-        cor_t[i] = cov_t[i] / (torch.sqrt(torch.diag(cov_t[i]))[:, None] * torch.sqrt(torch.diag(cov_t[i]))[None, :])
+        cor_s[i] = cov_s[i] / (torch.sqrt(torch.diag(cov_s[i]))
+                               [:, None] * torch.sqrt(torch.diag(cov_s[i]))[None, :])
+        cor_t[i] = cov_t[i] / (torch.sqrt(torch.diag(cov_t[i]))
+                               [:, None] * torch.sqrt(torch.diag(cov_t[i]))[None, :])
 
-    sns.heatmap(cov_t[0].detach().cpu().numpy(), vmin=-cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
+    sns.heatmap(cov_t[0].detach().cpu().numpy(), vmin=-
+                cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
     plt.show()
-    sns.heatmap(cov_t[1].detach().cpu().numpy(), vmin=-cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
+    sns.heatmap(cov_t[1].detach().cpu().numpy(), vmin=-
+                cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
     plt.show()
-    sns.heatmap(cov_t[2].detach().cpu().numpy(), vmin=-cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
-    plt.show()
-
-    sns.heatmap(cov_s[0].detach().cpu().numpy(), vmin=-cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
-    plt.show()
-    sns.heatmap(cov_s[1].detach().cpu().numpy(), vmin=-cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
-    plt.show()
-    sns.heatmap(cov_s[2].detach().cpu().numpy(), vmin=-cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
+    sns.heatmap(cov_t[2].detach().cpu().numpy(), vmin=-
+                cov_t.min(), vmax=cov_t.max(), cmap="RdBu_r")
     plt.show()
 
-    sns.heatmap(cor_t[0].detach().cpu().numpy(), vmin=-1, vmax=1, cmap="RdBu_r")
+    sns.heatmap(cov_s[0].detach().cpu().numpy(), vmin=-
+                cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
     plt.show()
-    sns.heatmap(cor_t[1].detach().cpu().numpy(), vmin=-1, vmax=1, cmap="RdBu_r")
+    sns.heatmap(cov_s[1].detach().cpu().numpy(), vmin=-
+                cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
     plt.show()
-    sns.heatmap(cor_t[2].detach().cpu().numpy(), vmin=-1, vmax=1, cmap="RdBu_r")
+    sns.heatmap(cov_s[2].detach().cpu().numpy(), vmin=-
+                cov_s.min(), vmax=cov_s.max(), cmap="RdBu_r")
+    plt.show()
+
+    sns.heatmap(cor_t[0].detach().cpu().numpy(),
+                vmin=-1, vmax=1, cmap="RdBu_r")
+    plt.show()
+    sns.heatmap(cor_t[1].detach().cpu().numpy(),
+                vmin=-1, vmax=1, cmap="RdBu_r")
+    plt.show()
+    sns.heatmap(cor_t[2].detach().cpu().numpy(),
+                vmin=-1, vmax=1, cmap="RdBu_r")
     plt.show()
 
     results = []
@@ -201,11 +225,13 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
         # plt.legend()
         # plt.show()
 
-        mu = info['mu'].reshape(info['mu'].shape[0], num_nodes, engine.num_pred)
+        mu = info['mu'].reshape(info['mu'].shape[0],
+                                num_nodes, engine.num_pred)
         mu = engine.scaler.inverse_transform(mu)
         mu[mu < 0] = 0
         target = testy[:, 0, :, pred_len]
-        info["target"] = engine.scaler.transform(target).reshape(target.shape[0], -1)
+        info["target"] = engine.scaler.transform(
+            target).reshape(target.shape[0], -1)
         mu_list.append(mu.detach().cpu())
         target_list.append(target.detach().cpu())
 
@@ -218,9 +244,12 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
         for i in range(engine.num_pred):
             mask = target[:, :, i] > 0
 
-            rmse = ((((mu[:, :, i]-target[:, :, i])**2) * mask).sum() / mask.sum()).sqrt()
-            mape = ((((mu[:, :, i] - target[:, :, i]).abs() / (target[:, :, i] + 1e-6)) * mask).sum() / mask.sum()) * 100
-            mae = ((mu[:, :, i] - target[:, :, i]).abs() * mask).sum() / mask.sum()
+            rmse = ((((mu[:, :, i]-target[:, :, i])**2)
+                    * mask).sum() / mask.sum()).sqrt()
+            mape = ((((mu[:, :, i] - target[:, :, i]).abs() /
+                    (target[:, :, i] + 1e-6)) * mask).sum() / mask.sum()) * 100
+            mae = ((mu[:, :, i] - target[:, :, i]).abs()
+                   * mask).sum() / mask.sum()
 
             # crps_i = (crps[:, :, i] * mask).sum() / mask.sum()
             # print(f"{mask.sum() / (mask.shape[0]*mask.shape[1])*100:.2f}")
@@ -292,7 +321,8 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
     # i=7
     for i in tqdm(range(325)):
         for t in range(24):
-            plt.imshow(cov_total[i, t], vmin=-cov_total[i].max(), vmax=cov_total[i].max(), cmap='RdBu_r')
+            plt.imshow(cov_total[i, t], vmin=-cov_total[i].max(),
+                       vmax=cov_total[i].max(), cmap='RdBu_r')
             # add title
             plt.title(f'loc_{i}_time_{str(t).zfill(2)}:00')
             # add legend
@@ -319,12 +349,14 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
 
     for i in tqdm(range(12)):
         for t in range(24):
-            plt.imshow(cov_total[i, t], vmin=-cov_total[i].max(), vmax=cov_total[i].max(), cmap='RdBu_r')
+            plt.imshow(cov_total[i, t], vmin=-cov_total[i].max(),
+                       vmax=cov_total[i].max(), cmap='RdBu_r')
             # add title
             plt.title(f'loc_{i}_time_{str(t).zfill(2)}:00')
             # add legend
             plt.colorbar()
-            plt.savefig(f'/app/temporal_cov/loc_{i}_time_{str(t).zfill(2)}.png')
+            plt.savefig(
+                f'/app/temporal_cov/loc_{i}_time_{str(t).zfill(2)}.png')
             plt.clf()
 
             correlation = torch.corrcoef(cov_total[i, t])
@@ -333,7 +365,8 @@ def main(model_path, dataloader, adj_mx, target_sensors, target_sensor_inds, num
             plt.title(f'loc_{i}_time_{str(t).zfill(2)}:00')
             # add legend
             plt.colorbar()
-            plt.savefig(f'/app/temporal_cor/loc_{i}_time_{str(t).zfill(2)}.png')
+            plt.savefig(
+                f'/app/temporal_cor/loc_{i}_time_{str(t).zfill(2)}.png')
             plt.clf()
 
     # results = [{'rmse':x['rmse'] , 'mape':x['mape'] , 'crps' : x['crps'] , 'crps_mean':x['crps'].mean().item() , 'len' : x['crps'].shape[0]} for x in results]
@@ -372,7 +405,8 @@ if __name__ == "__main__":
     # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     import pandas as pd
     result = pd.DataFrame(np.zeros((0, 4)))
-    sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(args.adjdata, args.adjtype)
+    sensor_ids, sensor_id_to_ind, adj_mx = util.load_adj(
+        args.adjdata, args.adjtype)
     torch.manual_seed(99)
     np.random.seed(99)
 
@@ -413,5 +447,6 @@ if __name__ == "__main__":
         result_rmse, result_mape, result_mae = main(
             f"{logpath}/{file}", dataloader, adj_mx, target_sensors, target_sensor_inds, num_nodes)
 
-        result = pd.concat([result, pd.DataFrame([[file, *result_rmse, *result_mape, *result_mae]])], axis=0)
+        result = pd.concat([result, pd.DataFrame(
+            [[file, *result_rmse, *result_mape, *result_mae]])], axis=0)
         result.to_csv(savepath)
