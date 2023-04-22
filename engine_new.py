@@ -8,9 +8,10 @@ import math
 import torch.nn as nn
 import torch.distributions as Dist
 
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 import wandb
-
+import properscoring as ps
+import numpy as np
 
 def get_zero_grad_hook(mask):
     def hook(grad):
@@ -138,26 +139,24 @@ class CholeskyResHead(nn.Module):
         return nll
 
     def sample(self, features, nsample=None):
-        mu, R, L_s, L_t = self.get_parameters(features)
-        b, nt, r = R.shape
-        n = self.n_vars
-        t = len(self.pred_len)
+        mu, L_s, L_t = self.get_parameters(features)
+        b, n, t, _ = mu.shape
+        r = L_s.shape[0]
+        logw = features["w"].squeeze(-1)
 
         U = torch.inverse(L_s).unsqueeze(0).repeat(b, 1, 1, 1)
         V = torch.inverse(L_t).unsqueeze(0).repeat(b, 1, 1, 1)
-        mu = mu.reshape(b, n, t)
 
-        device = mu.device
-        iid_dist = Dist.Independent(Dist.Normal(torch.zeros((b, r+1, n, t), device=device), torch.ones((b, r+1, n, t), device=device)), 1)
+        mixture_dist = Dist.Categorical(logits=logw)
+        mixture_sample = mixture_dist.sample((nsample,))
+        mixture_sample_r = mixture_sample.reshape(b,nsample,1,1,1).repeat(1,1,r,n,t)
 
-        if n is None:
-            samples = iid_dist.sample()
-        else:
-            samples = iid_dist.sample((nsample,))
+        eps = torch.randn((b,nsample,r,n,t), device=mu.device)
+        com_samples = mu.reshape(b,n,t).unsqueeze(1).unsqueeze(1) + torch.einsum("brln,bsrnt,brtk->bsrlk", U , eps , V.transpose(-1,-2))
 
-        samples = mu.unsqueeze(0) + torch.einsum("brln,sbrnt, brtk->sbrlk", U, samples, V).sum(2)
+        samples = torch.gather(com_samples, 2, mixture_sample_r)
 
-        return samples
+        return samples[:,:,0,:,:]
         # torch.einsum("ln,nt,tk->lk", U[0],samples[0,0],V[0])
 
     def get_parameters(self, features):
@@ -225,8 +224,8 @@ class MDN_trainer():
         if not os.path.exists(self.logdir):
             os.makedirs(self.logdir)
 
-        if summary:
-            self.summary = SummaryWriter(logdir=f'{self.logdir}')
+        # if summary:
+        #     self.summary = SummaryWriter(logdir=f'{self.logdir}')
         self.cnt = 0
         self.log_softmax = nn.LogSoftmax(dim=-1)
 
@@ -340,10 +339,38 @@ class MDN_trainer():
 
         return features
 
-    def eval(self, input, real_val):
+    def eval(self, input, real_val, crps=False):
         self.model_list.eval()
 
         with torch.no_grad():
             info = self.train(input, real_val, eval=True)
 
+            if crps:
+                crps, ES = self.get_crps(info)
+                info["crps"] = crps.mean()
+                info["ES"] = ES
+
         return info
+
+    def get_crps(self, features):
+        output = self.res_head.sample(features=features, nsample=100)
+        scaled_real_val = features['target']
+        real_val = self.scaler.inverse_transform(scaled_real_val)
+
+        b, s, n, t = output.shape
+        output = self.scaler.inverse_transform(output)
+        output[output < 0] = 0
+        real_val = real_val.reshape(b, n, t)
+
+        diff = (output-real_val.unsqueeze(1)).abs()
+        diff = torch.norm(diff.reshape(b, s, n*t), p=2, dim=-1)
+        cdist = torch.cdist(output.reshape(b, s, n*t), output.reshape(b, s, n*t), p=2)
+
+        ES = diff.mean(-1) - (cdist.sum((-1, -2))/(s**2) * 0.5)
+        crps = ps.crps_ensemble(real_val.reshape(b,n*t).cpu().numpy(), output.reshape(b,s,n*t).cpu().numpy(), axis=1)
+        crps = np.reshape(crps, (b, n, t))
+        masked_crps = crps * (real_val != 0).float().cpu().numpy()
+        masked_crps = masked_crps.sum() / (real_val != 0).float().cpu().numpy().sum()
+
+        return masked_crps, ES.mean()
+

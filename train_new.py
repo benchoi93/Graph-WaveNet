@@ -3,7 +3,7 @@ import numpy as np
 import argparse
 import time
 import util
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 # from engine import trainer
 from engine_new import MDN_trainer
 import wandb
@@ -27,7 +27,7 @@ parser.add_argument('--batch_size', type=int, default=128, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
-parser.add_argument('--epochs', type=int, default=100, help='')
+parser.add_argument('--epochs', type=int, default=2, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--seed', type=int, default=99, help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
@@ -42,7 +42,7 @@ parser.add_argument('--mix_mean', type=str, default="False", choices=["True", "F
 
 args = parser.parse_args()
 args.mix_mean = True if args.mix_mean == "True" else False
-wandb.init(project="GWN", config=args)
+wandb.init(project="GWN_0421", config=args)
 
 print(wandb.config)
 
@@ -139,10 +139,6 @@ def main():
             valid_nll_loss.append(metrics['nll_loss'])
             valid_mse_loss.append(metrics['mse_loss'])
 
-            # if i % 10 == 0:
-            #     if iter == 0:
-            #         engine.plot_cov()
-
         test_loss = []
         test_mape = []
         test_rmse = []
@@ -172,6 +168,7 @@ def main():
             test_rmse_list.append(metrics['rmse_list'])
             test_mae_list.append(metrics['mae_list'])
 
+
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
         print(log.format(i, (s2-s1)))
@@ -196,26 +193,6 @@ def main():
         mtest_mae_list = np.mean(np.array(test_mae_list), 0)
 
         his_loss.append(mvalid_loss)
-        engine.summary.add_scalar('time/train_time', train_time[-1], i)
-        engine.summary.add_scalar('time/val_time', val_time[-1], i)
-
-        engine.summary.add_scalar('loss/train_loss', mtrain_loss, i)
-        engine.summary.add_scalar('loss/val_loss', mvalid_loss, i)
-
-        engine.summary.add_scalar('errors/train_mape', mtrain_mape, i)
-        engine.summary.add_scalar('errors/train_rmse', mtrain_rmse, i)
-        engine.summary.add_scalar('errors/val_mape', mvalid_mape, i)
-        engine.summary.add_scalar('errors/val_rmse', mvalid_rmse, i)
-
-        engine.summary.add_scalar('errors/test_mape', mtest_mape, i)
-        engine.summary.add_scalar('errors/test_rmse', mtest_rmse, i)
-
-        engine.summary.add_scalar('loss/train_nll_loss', mtrain_nll_loss, i)
-        engine.summary.add_scalar('loss/val_nll_loss', mvalid_nll_loss, i)
-        engine.summary.add_scalar('loss/test_nll_loss', mtest_nll_loss, i)
-        engine.summary.add_scalar('loss/train_mse_loss', np.mean(train_mse_loss), i)
-        engine.summary.add_scalar('loss/val_mse_loss', np.mean(valid_mse_loss), i)
-        engine.summary.add_scalar('loss/test_mse_loss', np.mean(test_mse_loss), i)
 
         wandb.log({
             'time/train_time': train_time[-1],
@@ -238,10 +215,6 @@ def main():
 
         # for j in range(len(args.pred_len)):
         for j in [2, 5, 8, 11]:
-            engine.summary.add_scalar(f'errors_spec/test_mape_{j}', mtest_mape_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_rmse_{j}', mtest_rmse_list[j], i)
-            engine.summary.add_scalar(f'errors_spec/test_mae_{j}', mtest_mae_list[j], i)
-
             wandb.log({
                 f'errors_spec/test_mape_{j}': mtest_mape_list[j],
                 f'errors_spec/test_rmse_{j}': mtest_rmse_list[j],
@@ -273,7 +246,8 @@ def main():
     test_mape = []
     test_rmse = []
     test_nll_loss = []
-    # test_mse_loss = []
+    test_crps_loss = []
+    test_es_loss = []
 
     s1 = time.time()
     for iter, (x, y) in enumerate(dataloader['test_loader']):
@@ -282,26 +256,40 @@ def main():
         testy = y.to(device)
         testy = testy.transpose(1, 3)
 
-        metrics = engine.eval(testx, testy[:, 0, :, :])
+        metrics = engine.eval(testx, testy[:, 0, :, :], crps=True)
 
         test_loss.append(metrics['loss'])
         test_mape.append(metrics['mape'])
         test_rmse.append(metrics['rmse'])
         test_nll_loss.append(metrics['nll_loss'])
-        # test_mse_loss.append(metrics['mse_loss'])
+        test_crps_loss.append(metrics['crps'])
+        test_es_loss.append(metrics['ES'])
 
     mtest_loss = np.mean(test_loss)
     mtest_mape = np.mean(test_mape)
     mtest_rmse = np.mean(test_rmse)
     mtest_nll_loss = np.mean(test_nll_loss)
-    # mtest_mse_loss = np.mean(test_mse_loss)
+    mtest_crps_loss = np.mean(test_crps_loss)
+    mtest_es_loss = np.mean(test_es_loss)
 
     print("Testing Results:")
     print("Test Loss: {:.4f}".format(mtest_loss))
     print("Test MAPE: {:.4f}".format(mtest_mape))
     print("Test RMSE: {:.4f}".format(mtest_rmse))
     print("Test NLL Loss: {:.4f}".format(mtest_nll_loss))
-    # print("Test MSE Loss: {:.4f}".format(mtest_mse_loss))
+    print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
+    print("Test ES Loss: {:.4f}".format(mtest_es_loss))
+
+    wandb.log({
+        'time/test_time': time.time() - s1,
+        'test/test_loss': mtest_loss,
+        'test/test_mape': mtest_mape,
+        'test/test_rmse': mtest_rmse,
+        'test/test_nll_loss': mtest_nll_loss,
+        'test/test_crps_loss': mtest_crps_loss,
+        'test/test_es_loss': mtest_es_loss,
+    })
+
 
 
 if __name__ == "__main__":
