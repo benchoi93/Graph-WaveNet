@@ -7,11 +7,12 @@ import util
 # from engine import trainer
 from engine_new import MDN_trainer
 import wandb
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 
-parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022-FLOW', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
@@ -27,7 +28,7 @@ parser.add_argument('--batch_size', type=int, default=128, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
-parser.add_argument('--epochs', type=int, default=2, help='')
+parser.add_argument('--epochs', type=int, default=30, help='')
 parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--seed', type=int, default=99, help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
@@ -38,11 +39,13 @@ parser.add_argument("--pred-len", type=int, default=12)
 parser.add_argument("--rho", type=float, default=1)
 parser.add_argument("--diag", action="store_true")
 parser.add_argument('--loss', type=str, default='mse', choices=["mse", "mae"])
-parser.add_argument('--mix_mean', type=str, default="False", choices=["True", "False"])
+parser.add_argument('--mix_mean', type=str, default="True", choices=["True", "False"])
 
 args = parser.parse_args()
+
 args.mix_mean = True if args.mix_mean == "True" else False
-wandb.init(project="GWN_0421", config=args)
+
+wandb.init(project="GWN_1120", config=args)
 
 print(wandb.config)
 
@@ -56,6 +59,13 @@ def main():
     args.mix_mean = wandb.config.mix_mean
     args.rho = wandb.config.rho
     args.seed = wandb.config.seed
+
+    if args.n_components == 0:
+        args.rho = 0
+        args.n_components = 1
+
+    if args.data == 'data/METR-LA':
+        args.adjdata = 'data/sensor_graph/adj_mx.pkl'
 
     # set seed
     torch.manual_seed(args.seed)
@@ -92,7 +102,7 @@ def main():
     train_time = []
 
     best_val_loss = float('inf')
-    for i in range(0, args.epochs+1):
+    for i in range(0, args.epochs):
         train_loss = []
         train_mape = []
         train_rmse = []
@@ -250,35 +260,41 @@ def main():
     test_es_loss = []
 
     s1 = time.time()
-    for iter, (x, y) in enumerate(dataloader['test_loader']):
+    for iter, (x, y) in tqdm(enumerate(dataloader['test_loader']) , total=len(dataloader['test_loader'])):
         testx = x.to(device)
         testx = testx.transpose(1, 3)
         testy = y.to(device)
         testy = testy.transpose(1, 3)
 
-        metrics = engine.eval(testx, testy[:, 0, :, :], crps=True)
+        metrics = engine.eval(testx, testy[:, 0, :, :])
 
         test_loss.append(metrics['loss'])
         test_mape.append(metrics['mape'])
         test_rmse.append(metrics['rmse'])
         test_nll_loss.append(metrics['nll_loss'])
-        test_crps_loss.append(metrics['crps'])
-        test_es_loss.append(metrics['ES'])
+        # test_crps_loss.append(metrics['crps'])
+        # test_es_loss.append(metrics['ES'])
 
     mtest_loss = np.mean(test_loss)
     mtest_mape = np.mean(test_mape)
     mtest_rmse = np.mean(test_rmse)
     mtest_nll_loss = np.mean(test_nll_loss)
-    mtest_crps_loss = np.mean(test_crps_loss)
-    mtest_es_loss = np.mean(test_es_loss)
+    # mtest_crps_loss = np.mean(test_crps_loss)
+    # mtest_es_loss = np.mean(test_es_loss)
 
     print("Testing Results:")
     print("Test Loss: {:.4f}".format(mtest_loss))
     print("Test MAPE: {:.4f}".format(mtest_mape))
     print("Test RMSE: {:.4f}".format(mtest_rmse))
     print("Test NLL Loss: {:.4f}".format(mtest_nll_loss))
-    print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
-    print("Test ES Loss: {:.4f}".format(mtest_es_loss))
+    # print("Test CRPS Loss: {:.4f}".format(mtest_crps_loss))
+    # print("Test ES Loss: {:.4f}".format(mtest_es_loss))
+    for j in [2, 5, 8, 11]:
+        wandb.log({
+            f'test/test_mape_{j}': mtest_mape_list[j],
+            f'test/test_rmse_{j}': mtest_rmse_list[j],
+            f'test/test_mae_{j}': mtest_mae_list[j],
+        })
 
     wandb.log({
         'time/test_time': time.time() - s1,
@@ -286,8 +302,8 @@ def main():
         'test/test_mape': mtest_mape,
         'test/test_rmse': mtest_rmse,
         'test/test_nll_loss': mtest_nll_loss,
-        'test/test_crps_loss': mtest_crps_loss,
-        'test/test_es_loss': mtest_es_loss,
+        # 'test/test_crps_loss': mtest_crps_loss,
+        # 'test/test_es_loss': mtest_es_loss,
     })
 
 

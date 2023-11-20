@@ -61,10 +61,9 @@ args.randomadj = True
 args.adjtype = 'doubletransition'
 
 import os
-os.environ['WANDB_API_KEY']='your-API-key'
-os.environ['WANDB_ENTITY']='your-wandb-username'
-
-wandb.init(project="GWN_resmix", config=args)
+# os.environ['WANDB_API_KEY']='your-API-key'
+# os.environ['WANDB_ENTITY']='your-wandb-username'
+wandb.init(project="GWN_new", config=args)
 
 
 def main():
@@ -222,6 +221,9 @@ def main():
         test_rmse_list = []
         test_mae_list = []
 
+        test_crps_list = []
+        test_es_list = []
+
         s1 = time.time()
         for iter, (x, y) in enumerate(dataloader['test_loader']):
             testx = torch.Tensor(x).to(device)
@@ -244,6 +246,9 @@ def main():
             test_rmse_list.append(metrics['rmse_list'])
             test_mae_list.append(metrics['mae_list'])
 
+            test_crps_list.append(metrics['crps'])
+            test_es_list.append(metrics['ES'])
+
         s2 = time.time()
         log = 'Epoch: {:03d}, Inference Time: {:.4f} secs'
         print(log.format(i, (s2-s1)))
@@ -252,13 +257,13 @@ def main():
         mtrain_mape = np.mean(train_mape)
         mtrain_rmse = np.mean(train_rmse)
         mtrain_nll_loss = np.mean(train_nll_loss)
-        mtrain_reg_loss = np.mean(train_reg_loss)
+        # mtrain_reg_loss = np.mean(train_reg_loss)
 
         mvalid_loss = np.mean(valid_loss)
         mvalid_mape = np.mean(valid_mape)
         mvalid_rmse = np.mean(valid_rmse)
         mvalid_nll_loss = np.mean(valid_nll_loss)
-        mvalid_reg_loss = np.mean(valid_reg_loss)
+        # mvalid_reg_loss = np.mean(valid_reg_loss)
         mvalid_crps_loss = np.mean(valid_crps_loss)
         mvalid_es_loss = np.mean(valid_es_loss)
 
@@ -266,7 +271,7 @@ def main():
         mtest_mape = np.mean(test_mape)
         mtest_rmse = np.mean(test_rmse)
         mtest_nll_loss = np.mean(test_nll_loss)
-        mtest_reg_loss = np.mean(test_reg_loss)
+        # mtest_reg_loss = np.mean(test_reg_loss)
         mtest_crps_loss = np.mean(test_crps_loss)
         mtest_es_loss = np.mean(test_es_loss)
 
@@ -322,11 +327,15 @@ def main():
                 "valid_rmse": mvalid_rmse,
                 "valid_nll_loss": mvalid_nll_loss,
                 "valid_mse_loss": np.mean(valid_mse_loss),
+                "valid_crps_loss": mvalid_crps_loss,
+                "valid_es_loss": mvalid_es_loss,
                 "test_loss": mtest_loss,
                 "test_mape": mtest_mape,
                 "test_rmse": mtest_rmse,
                 "test_nll_loss": mtest_nll_loss,
                 "test_mse_loss": np.mean(test_mse_loss),
+                "test_crps_loss": mtest_crps_loss,
+                "test_es_loss": mtest_es_loss,
             }
         )
 

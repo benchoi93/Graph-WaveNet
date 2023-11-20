@@ -152,7 +152,7 @@ class CholeskyResHead(nn.Module):
         mixture_sample_r = mixture_sample.reshape(b,nsample,1,1,1).repeat(1,1,r,n,t)
 
         eps = torch.randn((b,nsample,r,n,t), device=mu.device)
-        com_samples = mu.reshape(b,n,t).unsqueeze(1).unsqueeze(1) + torch.einsum("brln,bsrnt,brtk->bsrlk", U , eps , V.transpose(-1,-2))
+        com_samples = mu.reshape(b,r,n,t).unsqueeze(1) + torch.einsum("brln,bsrnt,brtk->bsrlk", U , eps , V.transpose(-1,-2))
 
         samples = torch.gather(com_samples, 2, mixture_sample_r)
 
@@ -348,7 +348,7 @@ class MDN_trainer():
             if crps:
                 crps, ES = self.get_crps(info)
                 info["crps"] = crps.mean()
-                info["ES"] = ES
+                info["ES"] = ES.item()
 
         return info
 

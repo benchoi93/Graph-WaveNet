@@ -25,19 +25,26 @@ def generate_graph_seq2seq_io_data(
     # y: (epoch_size, output_length, num_nodes, output_dim)
     """
 
-    num_samples, num_nodes = df.shape
-    data = np.expand_dims(df.values, axis=-1)
-    feature_list = [data]
-    if add_time_in_day:
-        time_ind = (df.index.values - df.index.values.astype("datetime64[D]")) / np.timedelta64(1, "D")
-        time_in_day = np.tile(time_ind, [1, num_nodes, 1]).transpose((2, 1, 0))
-        feature_list.append(time_in_day)
-    if add_day_in_week:
-        dow = df.index.dayofweek
-        dow_tiled = np.tile(dow, [1, num_nodes, 1]).transpose((2, 1, 0))
-        feature_list.append(dow_tiled)
+    num_samples, num_nodes, num_features = df.shape
+    # data = np.expand_dims(df.values, axis=-1)
+    # feature_list = [data]
+    # if add_time_in_day:
+    #     time_ind = (df.index.values - df.index.values.astype("datetime64[D]")) / np.timedelta64(1, "D")
+    #     time_in_day = np.tile(time_ind, [1, num_nodes, 1]).transpose((2, 1, 0))
+    #     feature_list.append(time_in_day)
+    # if add_day_in_week:
+    #     dow = df.index.dayofweek
+    #     dow_tiled = np.tile(dow, [1, num_nodes, 1]).transpose((2, 1, 0))
+    #     feature_list.append(dow_tiled)
 
-    data = np.concatenate(feature_list, axis=-1)
+    # data = np.concatenate(feature_list, axis=-1)
+    if "FLOW" in args.output_dir:
+        data = df[:,:,(0,2)]
+    elif "SPEED" in args.output_dir:
+        data = df[:,:,(1,2)]
+    else:
+        raise ValueError("Unknown data type")
+    
     x, y = [], []
     min_t = abs(min(x_offsets))
     max_t = abs(num_samples - abs(max(y_offsets)))  # Exclusive
@@ -51,7 +58,8 @@ def generate_graph_seq2seq_io_data(
 
 def generate_train_val_test(args):
     seq_length_x, seq_length_y = args.seq_length_x, args.seq_length_y
-    df = pd.read_hdf(args.traffic_df_filename)
+    # df = pd.read_hdf(args.traffic_df_filename)
+    df = np.load(args.traffic_df_filename)
     # 0 is the latest observed sample.
     x_offsets = np.sort(np.concatenate((np.arange(-(seq_length_x - 1), 1, 1),)))
     # Predict the next one hour
@@ -93,8 +101,8 @@ def generate_train_val_test(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output_dir", type=str, default="data/METR-LA", help="Output directory.")
-    parser.add_argument("--traffic_df_filename", type=str, default="data/metr-la.h5", help="Raw traffic readings.",)
+    parser.add_argument("--output_dir", type=str, default="data/PEMS-BAY-2022-SPEED", help="Output directory.")
+    parser.add_argument("--traffic_df_filename", type=str, default="data/PEMSBAY_2022.npy", help="Raw traffic readings.",)
     parser.add_argument("--seq_length_x", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--seq_length_y", type=int, default=12, help="Sequence Length.",)
     parser.add_argument("--y_start", type=int, default=1, help="Y pred start", )
