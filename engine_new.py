@@ -33,6 +33,8 @@ class FixedResCov(nn.Module):
         self.diag = diag
         self.rho = rho
 
+        self.sigma = nn.Parameter(torch.randn(n_components), requires_grad=True) 
+
     @property
     def L1(self):
         # Ltemp = torch.tanh(self._L) * self.rho
@@ -115,6 +117,9 @@ class CholeskyResHead(nn.Module):
         mu, L_s, L_t = self.get_parameters(features)
         # w = features["w"]
         logw = features["w"].squeeze(-1)
+        sigma = features["sigma"]
+        # sigma = torch.exp(-sigma)
+        sigma = torch.sigmoid(sigma) * 0.1
 
         b, n, t, r = mu.shape
         n = self.n_vars
@@ -123,16 +128,51 @@ class CholeskyResHead(nn.Module):
         R_ext = (mu - target.unsqueeze(-1))
         R_flatten = R_ext.permute(0, 3, 1, 2)
 
-        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
-        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
+        # using eig decomposition of K_t and K_s
+        # K_t = L_t @ L_t.transpose(-1, -2)
+        # K_s = L_s @ L_s.transpose(-1, -2)
+        # D_t, U_t = torch.linalg.eigh(K_t)
+        # D_s, U_s = torch.linalg.eigh(K_s)
+
+        # using svd of L_t and L_s
+        U_t, S_t, _ = torch.svd(L_t + 1e-6 * torch.eye(t, device=L_t.device))
+        U_s, S_s, _ = torch.svd(L_s + 1e-6 * torch.eye(n, device=L_s.device) )
+        D_t = S_t.pow(2)
+        D_s = S_s.pow(2)
+
+        # capacitance_mat = torch.kron(torch.diag_embed(D_s), torch.diag_embed(D_t)).diag() + sigma**2
+        capacitance_mat = [(torch.kron(D_s[i], D_t[i]) + sigma[i]**2).pow(-1/2) for i in range(r)]
+        capacitance_mat = torch.stack(capacitance_mat, dim=0)
+
+        kron_U_vec = torch.einsum("rij, brjk, rkl -> bril", U_s.transpose(-1,-2), R_flatten, U_t)
+        kron_U_vec = kron_U_vec.reshape(b, r, n*t)
+        a = capacitance_mat.unsqueeze(0) * kron_U_vec
+        mahabolis = a.pow(2).sum(-1) # new approach
+
+        # K = [torch.inverse(torch.kron(K_s[i], K_t[i]) + sigma[i]**2 * torch.eye(n*t, device=K_s.device)) for i in range(r)]
+        # K = torch.stack(K, dim=0)
+        # R_flatten2 = R_flatten.reshape(b, r, n*t, 1)
+        # mahabolis2 = torch.einsum("brij, rjk, brkl -> bril", R_flatten2.transpose(-1,-2), K, R_flatten2).squeeze(-1).squeeze(-1) # naive approach
+
+        # L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
+        # L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
+        # wandb.log({
+        #     "debug/mahabolis_mae_min": ((mahabolis - mahabolis2).abs()).min(),
+        #     "debug/mahabolis_mae_mean": ((mahabolis - mahabolis2).abs()).mean(),
+        #     "debug/mahabolis_mae_max": ((mahabolis - mahabolis2).abs()).max(),
+        #     "debug/mahabolis_mape_min": ((mahabolis - mahabolis2).abs() / (mahabolis2.abs()+1e-6)).min(),
+        #     "debug/mahabolis_mape_mean": ((mahabolis - mahabolis2).abs() / (mahabolis2.abs()+1e-6)).mean(),
+        #     "debug/mahabolis_mape_max": ((mahabolis - mahabolis2).abs() / (mahabolis2.abs()+1e-6)).max()
+        # })
 
         Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1)
         Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1)
 
-        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
-        mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+        # Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        # mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
 
-        nll = -n*t/2 * math.log(2*math.pi) + mahabolis + n * Vlogdet + t * Ulogdet + logw
+        nll = -n*t/2 * math.log(2*math.pi) - 0.5* mahabolis + n * Vlogdet.unsqueeze(0) + t * Ulogdet.unsqueeze(0) + logw
+        # nll = -n*t/2 * math.log(2*math.pi) - 0.5* mahabolis2 + n * Vlogdet.unsqueeze(0) + t * Ulogdet.unsqueeze(0) + logw
 
         nll = - torch.logsumexp(nll, dim=1)
         # print(f"maxnll {nll.max():.5f} minnll {nll.min():.5f}")
@@ -287,7 +327,8 @@ class MDN_trainer():
             "rho": self.covariance.rho,
             "target": self.scaler.transform(real),
             "unscaled_target": real,
-            "scaler": self.scaler
+            "scaler": self.scaler,
+            "sigma" : self.covariance.sigma
         }
 
         loss, nll_loss, mse_loss = self.res_head.forward(
@@ -299,7 +340,7 @@ class MDN_trainer():
             loss.backward()
             if self.clip is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
-
+            
             self.optimizer.step()
 
         output = ((mus * w.exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)).reshape(real_val.shape[0], self.num_nodes, self.num_pred)

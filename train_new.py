@@ -12,7 +12,8 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 
-parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022-FLOW', help='data path')
+# parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022-FLOW', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')
@@ -24,7 +25,7 @@ parser.add_argument('--seq_length', type=int, default=12, help='')
 parser.add_argument('--nhid', type=int, default=64, help='')
 parser.add_argument('--in_dim', type=int, default=2, help='inputs dimension')
 parser.add_argument('--num_nodes', type=int, default=12, help='number of nodes')
-parser.add_argument('--batch_size', type=int, default=128, help='batch size')
+parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout rate')
 parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay rate')
@@ -33,7 +34,7 @@ parser.add_argument('--print_every', type=int, default=50, help='')
 parser.add_argument('--seed', type=int, default=99, help='random seed')
 parser.add_argument('--save', type=str, default='./garage/pems', help='save path')
 parser.add_argument('--expid', type=int, default=1, help='experiment id')
-parser.add_argument('--n_components', type=int, default=3, help='experiment id')
+parser.add_argument('--n_components', type=int, default=1, help='experiment id')
 parser.add_argument('--save_every', type=int, default=20, help='experiment id')
 parser.add_argument("--pred-len", type=int, default=12)
 parser.add_argument("--rho", type=float, default=1)
@@ -43,14 +44,8 @@ parser.add_argument('--mix_mean', type=str, default="True", choices=["True", "Fa
 
 args = parser.parse_args()
 
-args.mix_mean = True if args.mix_mean == "True" else False
-
-wandb.init(project="GWN_1120", config=args)
-
+wandb.init(project="GWN_1128", config=args)
 print(wandb.config)
-
-args.pred_len = list(range(12))
-
 torch.backends.cudnn.benchmark = True
 
 
@@ -59,6 +54,9 @@ def main():
     args.mix_mean = wandb.config.mix_mean
     args.rho = wandb.config.rho
     args.seed = wandb.config.seed
+    args.data = wandb.config.data
+    args.mix_mean = True if args.mix_mean == "True" else False
+    args.pred_len = list(range(12))
 
     if args.n_components == 0:
         args.rho = 0

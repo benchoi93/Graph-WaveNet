@@ -35,6 +35,7 @@ class FixedResCov(nn.Module):
         self.diag = diag
         self.rho = rho
 
+        self.sigma = nn.Parameter(torch.randn(1) , requires_grad=True)
         # mask1 = torch.tril(torch.ones_like(self._L1)).cuda()
         # mask2 = torch.tril(torch.ones_like(self._L2)).cuda()
         # mask2[:, 0, 0] = 0
@@ -126,25 +127,32 @@ class CholeskyResHead(nn.Module):
         mu, R, L_s, L_t = self.get_parameters(features)
         w = features["w"]
         logw = w.log().squeeze(-1)
+        sigma = features["sigma"]
 
         b, n, t, r = R.shape
         n = self.n_vars
         t = len(self.pred_len)
 
-        # R_ext = torch.concat([R, (target - mu - R.sum(-1)).unsqueeze(-1)], dim=-1)
-        # R_flatten = R_ext.permute(0, 3, 1, 2)
-
         R_ext = target - mu
         R_flatten = R_ext.unsqueeze(1).repeat(1, r+1, 1, 1)
 
-        L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
-        L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
+        K_s = L_s @ L_s.transpose(-1, -2)
+        K_t = L_t @ L_t.transpose(-1, -2)
+
+        D_t, U_t = torch.linalg.eigh(K_t)
+        D_s, U_s = torch.linalg.eigh(K_s)
+
+        # L_t = L_t.unsqueeze(0).repeat(b, 1, 1, 1)  # L_t L_tT = prc_T
+        # L_s = L_s.unsqueeze(0).repeat(b, 1, 1, 1)  # L_s L_sT = prc_S
 
         Ulogdet = L_s.diagonal(dim1=-1, dim2=-2).log().sum(-1)
         Vlogdet = L_t.diagonal(dim1=-1, dim2=-2).log().sum(-1)
 
-        Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
-        mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+        # Q_t = torch.einsum("brij,brjk,brkl->bril", L_s.transpose(-1, -2), R_flatten, L_t)
+        # mahabolis = -0.5 * torch.pow(Q_t, 2).sum((-1, -2))
+
+        capacitance_mat = torch.kron(torch.diag_embed(D_s), torch.diag_embed(D_t)).diag() + sigma**2
+        mahabolis = torch.kron(U_s, U_t)@torch.diag_embed(1/capacitance_mat)@torch.kron(U_s, U_t).mT
 
         nll = -n*t/2 * math.log(2*math.pi) + mahabolis + n * Vlogdet + t * Ulogdet + logw
 
@@ -351,7 +359,8 @@ class MDN_trainer():
             "rho": self.covariance.rho,
             "target": self.scaler.transform(real),
             "unscaled_target": real,
-            "scaler": self.scaler
+            "scaler": self.scaler,
+            "sigma": self.covariance.sigma
         }
 
         loss, nll_loss, reg_loss, mse_loss = self.res_head.forward(
