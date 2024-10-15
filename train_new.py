@@ -43,14 +43,8 @@ parser.add_argument('--mix_mean', type=str, default="True", choices=["True", "Fa
 
 args = parser.parse_args()
 
-args.mix_mean = True if args.mix_mean == "True" else False
-
 wandb.init(project="GWN_1120", config=args)
-
 print(wandb.config)
-
-args.pred_len = list(range(12))
-
 torch.backends.cudnn.benchmark = True
 
 
@@ -59,6 +53,9 @@ def main():
     args.mix_mean = wandb.config.mix_mean
     args.rho = wandb.config.rho
     args.seed = wandb.config.seed
+    args.data = wandb.config.data
+    args.mix_mean = True if args.mix_mean == "True" else False
+    args.pred_len = list(range(12))
 
     if args.n_components == 0:
         args.rho = 0
