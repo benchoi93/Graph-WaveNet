@@ -3,7 +3,9 @@
 # CUDA_VISIBLE_DEVICES=3 nohup python train_new.py --gcn_bool --adjtype doubletransition --addaptadj  --randomadj --epoch 200 --n_components 10 --nhid 64  --rho 1  >> out_run04.log &
 
 
-CUDA_VISIBLE_DEVICES=0 nohup wandb agent benchoi93/GWN_1120/9lya3k7v >> out_run00.log &
-CUDA_VISIBLE_DEVICES=1 nohup wandb agent benchoi93/GWN_1120/9lya3k7v >> out_run01.log &
-CUDA_VISIBLE_DEVICES=2 nohup wandb agent benchoi93/GWN_1120/9lya3k7v >> out_run02.log &
-CUDA_VISIBLE_DEVICES=3 nohup wandb agent benchoi93/GWN_1120/9lya3k7v >> out_run03.log &
+CUDA_VISIBLE_DEVICES=0 nohup wandb agent benchoi93/GWN_revision1/slfd1yx4 >> out_run00.log &
+CUDA_VISIBLE_DEVICES=1 nohup wandb agent benchoi93/GWN_revision1/slfd1yx4 >> out_run01.log &
+CUDA_VISIBLE_DEVICES=2 nohup wandb agent benchoi93/GWN_revision1/slfd1yx4 >> out_run02.log &
+CUDA_VISIBLE_DEVICES=3 nohup wandb agent benchoi93/GWN_revision1/slfd1yx4 >> out_run03.log &
+
+# wandb sweep -e benchoi93 --project GWN_revision1 sweep.yaml 

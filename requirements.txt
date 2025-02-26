@@ -9,3 +9,5 @@ tensorboardX
 properscoring
 matplotlib
 seaborn
+wandb
+tqdm

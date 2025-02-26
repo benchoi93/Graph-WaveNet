@@ -12,7 +12,8 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cuda:0', help='')
 
-parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022-FLOW', help='data path')
+# parser.add_argument('--data', type=str, default='data/PEMS-BAY-2022-FLOW', help='data path')
+parser.add_argument('--data', type=str, default='data/PEMS-BAY', help='data path')
 parser.add_argument('--adjdata', type=str, default='data/sensor_graph/adj_mx_bay.pkl', help='adj data path')
 
 parser.add_argument('--adjtype', type=str, default='doubletransition', help='adj type')

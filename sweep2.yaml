@@ -11,29 +11,32 @@ metric:
   name: errors/test_mape # need to log this metric in your code
   goal: minimize # among minimize, maximize
 parameters:
-  learning_rate:
-    min: 0.00001
-    max: 0.1
-  nhid:
-    min: 16
-    max: 128
-  dropout:
-    min: 0.1
-    max: 0.5
+  learning_rate: 
+    values: [0.015551451236553914]
+    # min: 0.00001
+    # max: 0.1
+  nhid: 
+    values: [98]
+    # min: 16
+    # max: 128
+  dropout: 
+    values: [0.4322110133550955]
+    # min: 0.1
+    # max: 0.5
   data:
     # values: ['data/PEMS-BAY', 'data/METR-LA', "data/PEMS-BAY-2022-FLOW", "data/PEMS-BAY-2022-SPEED"]
     # values: ['data/METR-LA']
-    values: ['data/METR-LA']
+    values: ['data/PEMS-BAY']
     # values: ["data/PEMS-BAY-2022-FLOW", "data/PEMS-BAY-2022-SPEED"]
   n_components:
-    # values: [0,1,2,3,4,5]
-    values: [1]
+    # values: [1,2,3,4,5,6,7,8,9,10]
+    values: [3]
   mix_mean:
     # values: ["True", "False"]
     values: ["True"]
   rho:
-    # values: [0.01]
-    values: [0]
+    values: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    # values: [1]
     # min: 0
     # max: 1
   seed:

@@ -79,35 +79,35 @@ class CholeskyResHead(nn.Module):
 
         # initialize nll_loss and mse_loss as torch tensor
         nll_loss = torch.tensor(10000)
-        mse_loss = torch.tensor(100)
+        mse_loss = torch.tensor(10000)
 
         if not self.rho == 0:
             nll_loss = self.get_nll(features, target, mask).mean()
 
-       # if not self.rho == 1:
-        predict = (features["mu"] * features['w'].exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)
+        if not self.rho == 1:
+            predict = (features["mu"] * features['w'].exp()[..., 0].unsqueeze(1).unsqueeze(1)).sum(-1)
 
-        target = features["target"]
-        unscaled_target = features["unscaled_target"]
+            target = features["target"]
+            unscaled_target = features["unscaled_target"]
 
-        mask = (unscaled_target != 0)
-        mask = mask.float()
-        mask /= torch.mean((mask))
-        mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
+            mask = (unscaled_target != 0)
+            mask = mask.float()
+            mask /= torch.mean((mask))
+            mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
 
-        if self.loss == "mae":
-            mse_loss = torch.abs(predict-target)
-        elif self.loss == "mse":
-            mse_loss = (predict-target) ** 2
-        else:
-            raise NotImplementedError
+            if self.loss == "mae":
+                mse_loss = torch.abs(predict-target)
+            elif self.loss == "mse":
+                mse_loss = (predict-target) ** 2
+            else:
+                raise NotImplementedError
 
-        mse_loss = mse_loss * mask
+            mse_loss = mse_loss * mask
 
-        mse_loss = torch.where(torch.isnan(mse_loss), torch.zeros_like(mse_loss), mse_loss)
+            mse_loss = torch.where(torch.isnan(mse_loss), torch.zeros_like(mse_loss), mse_loss)
 
-        mse_loss = torch.mean(mse_loss)
-
+            mse_loss = torch.mean(mse_loss)
+        
         loss = self.rho * nll_loss + (1-self.rho) * mse_loss
         return loss, nll_loss.item(), mse_loss.item()
 
